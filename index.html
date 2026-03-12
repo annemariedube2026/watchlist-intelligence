@@ -178,7 +178,7 @@ header {
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v2.0 · JSONP · No Server Needed</div>
+      <div class="logo-sub">v3.0 · Live Data · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -269,63 +269,28 @@ var EXPAND = {};     // ticker -> {l2, l3}
 var PENDING = {};    // ticker -> {resolve,reject,timer} for JSONP
 
 // ─────────────────────────────────────────────
-// JSONP ENGINE — no fetch, works from file://
+// FETCH ENGINE — works from https:// (GitHub Pages)
 // ─────────────────────────────────────────────
-var _cbCount = 0;
-
-function jsonp(url, timeout) {
-  timeout = timeout || 8000;
-  return new Promise(function(resolve, reject) {
-    var cbName = '_fh_cb_' + (++_cbCount);
-    var done = false;
-
-    window[cbName] = function(data) {
-      if (done) return;
-      done = true;
-      cleanup();
-      resolve(data);
-    };
-
-    var script = document.createElement('script');
-    script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + cbName;
-    script.onerror = function() {
-      if (done) return;
-      done = true;
-      cleanup();
-      reject(new Error('Script load failed — check API key or network'));
-    };
-
-    var timer = setTimeout(function() {
-      if (done) return;
-      done = true;
-      cleanup();
-      reject(new Error('Request timed out after ' + (timeout/1000) + 's'));
-    }, timeout);
-
-    function cleanup() {
-      clearTimeout(timer);
-      if (script.parentNode) script.parentNode.removeChild(script);
-      try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
-    }
-
-    document.head.appendChild(script);
-  });
-}
-
-function fhUrl(path) {
-  return 'https://finnhub.io/api/v1' + path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + FH_KEY;
+async function fhGet(path) {
+  var sep = path.indexOf('?') >= 0 ? '&' : '?';
+  var url = 'https://finnhub.io/api/v1' + path + sep + 'token=' + FH_KEY;
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  var data = await r.json();
+  if (data && data.error) throw new Error('Finnhub: ' + data.error);
+  return data;
 }
 
 // Load all data for one ticker using JSONP
 async function loadTicker(ticker) {
   try {
     // Sequential to stay under free tier rate limits
-    var quote    = await jsonp(fhUrl('/quote?symbol=' + ticker));
-    var profile  = await jsonp(fhUrl('/stock/profile2?symbol=' + ticker));
-    var metrics  = await jsonp(fhUrl('/stock/metric?symbol=' + ticker + '&metric=all'));
+    var quote    = await fhGet('/quote?symbol=' + ticker);
+    var profile  = await fhGet('/stock/profile2?symbol=' + ticker);
+    var metrics  = await fhGet('/stock/metric?symbol=' + ticker + '&metric=all');
     var to       = Math.floor(Date.now() / 1000);
     var from     = to - 60 * 60 * 24 * 90;
-    var candles  = await jsonp(fhUrl('/stock/candle?symbol=' + ticker + '&resolution=D&from=' + from + '&to=' + to));
+    var candles  = await fhGet('/stock/candle?symbol=' + ticker + '&resolution=D&from=' + from + '&to=' + to);
 
     DATA[ticker] = { quote: quote, profile: profile, metrics: metrics, candles: candles, err: null };
   } catch(e) {
@@ -374,9 +339,8 @@ async function connectAPIs() {
 
   try {
     // Test key with a JSONP call for AAPL quote
-    var test = await jsonp(fhUrl('/quote?symbol=AAPL'), 8000);
+    var test = await fhGet('/quote?symbol=AAPL');
 
-    if (test && test.error) throw new Error('Finnhub says: ' + test.error);
     if (!test || test.c === undefined) throw new Error('Unexpected response — key may be invalid');
 
     FH_KEY = fk;
