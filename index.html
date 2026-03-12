@@ -178,7 +178,7 @@ header {
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v3.0 · Live Data · GitHub Pages</div>
+      <div class="logo-sub">v3.1 · Live Data · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -194,7 +194,7 @@ header {
   <div class="api-row">
     <div class="api-field">
       <label>Finnhub API Key <span class="fb">Free</span></label>
-      <input type="password" id="fhKey" placeholder="Paste your Finnhub key here…" />
+      <input type="text" id="fhKey" placeholder="Paste your Finnhub key here…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
     </div>
     <div class="api-field">
       <label>Unusual Whales Key <span class="ub">Future</span></label>
@@ -328,22 +328,30 @@ function init() {
 // API CONNECT
 // ─────────────────────────────────────────────
 async function connectAPIs() {
+  // Clear any stale saved key first
+  try { localStorage.removeItem('wi_fh'); } catch(e) {}
+
   var fk = document.getElementById('fhKey').value.trim();
   var uk = document.getElementById('uwKey').value.trim();
+
   if (!fk) { alert('Please paste your Finnhub API key first.\n\nGet one free at finnhub.io'); return; }
 
+  // Show the key length to help debug
+  console.log('Key length:', fk.length, 'First 4:', fk.substring(0,4), 'Last 4:', fk.slice(-4));
+
   var btn = document.getElementById('connBtn');
-  btn.textContent = 'Testing…';
+  btn.textContent = 'Testing… (' + fk.length + ' chars)';
   btn.disabled = true;
   setStatus('');
 
+  // Set key immediately so fhGet uses it
+  FH_KEY = fk;
+
   try {
-    // Test key with a JSONP call for AAPL quote
     var test = await fhGet('/quote?symbol=AAPL');
 
-    if (!test || test.c === undefined) throw new Error('Unexpected response — key may be invalid');
+    if (!test || test.c === undefined) throw new Error('Unexpected response — key may be invalid. Got: ' + JSON.stringify(test));
 
-    FH_KEY = fk;
     UW_KEY = uk;
     localStorage.setItem('wi_fh', fk);
     if (uk) localStorage.setItem('wi_uw', uk);
@@ -354,10 +362,11 @@ async function connectAPIs() {
     refreshAll();
 
   } catch(e) {
+    FH_KEY = '';
     setStatus('err');
     btn.textContent = 'Connect & Save';
     btn.disabled = false;
-    alert('❌ Connection failed.\n\nError: ' + e.message + '\n\nPlease double-check your Finnhub API key.\nGet a free one at finnhub.io — click "Get free API key".');
+    alert('❌ Connection failed.\n\nError: ' + e.message + '\n\nKey used: ' + fk.length + ' characters, starts with: ' + fk.substring(0,4));
   }
 }
 
