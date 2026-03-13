@@ -904,56 +904,85 @@ function renderSection(ticker){
   html+=`<div class="cell"><span class="sig ${sigClass(s.sig)}">${sigDot(s.sig)} ${s.sig}</span></div>`;
   html+=`</div>`;
 
-  // LEVEL 2
+  // LEVEL 2 — full width free-flowing cards, NOT constrained to column grid
   if(l2){
-    html+=`<div class="row2" onclick="toggleL3('${ticker}')">`;
-    html+=`<div class="cell" style="padding:8px 10px;">
-      <div style="display:flex;align-items:center;gap:6px;margin-left:22px;">
-        <div class="xbtn${l3?' open':''}" style="width:14px;height:14px;font-size:9px;">${l3?'−':'+'}</div>
-        <span style="font-family:var(--mono);font-size:9px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;">Sub-Scores &amp; Raw Audit</span>
-      </div></div>`;
-    html+=`<div class="cell" style="font-size:10px;color:var(--text3);">—</div>`;
-    html+=`<div class="cell" style="font-size:10px;color:var(--text3);">—</div>`;
-    // Earnings sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#7a94aa;">↑ CONTEXT</div>
-      <div class="sbar-row"><span class="sbar-lbl">Next</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.earn?s.earn.date:'N/A'}</span></div>
-    </div></div>`;
-    // Insider sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#7a94aa;">↑ CONTEXT</div>
-      <div class="sbar-row"><span class="sbar-lbl">90d Net</span><span style="font-family:var(--mono);font-size:10px;color:${s.insider.net>0?'var(--green)':s.insider.net<0?'var(--red)':'var(--text2)'};">${s.insider.net!==0?(s.insider.net>0?'+':'')+s.insider.net.toLocaleString():'—'}</span></div>
-    </div></div>`;
-    // Exhaustion sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#ff3d57;">↑ EXHAUSTION (high=red=BAD)</div>
-      ${sbRow('RSI',s.raw.rsi,true)}${sbRow('Stretch',s.raw.d20,true)}${sbRow('Decay↑Bad',s.decay,true)}
-    </div></div>`;
-    // Momentum sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#00d4ff;">↑ MOMENTUM inputs</div>
-      ${sbRow('Slope',s.slope)}${sbRow('RSI Trend',s.rsiTrnd)}${sbRow('MACD',s.macd)}${sbRow('Mom.Hold',100-s.decay)}
-    </div></div>`;
-    // Valuation sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#ffd740;">↑ VALUATION inputs</div>
-      ${sbRow('PE/Sector',s.pevs)}${sbRow('PE/Market',s.pevm)}${sbRow('EV/EBITDA',s.evs)}
-    </div></div>`;
-    // Analyst sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#00e676;">↑ ANALYST inputs</div>
-      ${s.analystHasData?sbRow('Score',s.analyst):'<div class="sbar-row"><span class="sbar-lbl" style="color:var(--text3);">N/A</span></div>'}
-      <div class="sbar-row"><span class="sbar-lbl">Target</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.raw.ptMean!=='N/A'?'$'+s.raw.ptMean:'N/A'}</span></div>
-      <div class="sbar-row"><span class="sbar-lbl">Upside</span><span style="font-family:var(--mono);font-size:10px;color:${s.analystUpside>0?'var(--green)':'var(--red)'};">${s.analystHasData?(s.analystUpside>0?'+':'')+s.analystUpside.toFixed(1)+'%':'N/A'}</span></div>
-    </div></div>`;
-    // Smart $ sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#a78bfa;">↑ SMART $ (volume proxy)</div>
-      ${sbRow('Block',s.block)}${sbRow('VolRatio',Math.round(s.volRat*50))}${sbRow('Accum',s.accum)}
-    </div></div>`;
-    html+=`<div class="cell" style="font-size:10px;color:var(--text3);">—</div>`;
-    html+=`<div class="cell"><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">UW Flow<br><span class="ub" style="margin-top:3px;">Pending</span></span></div>`;
-    html+=`</div>`;
+    // Toggle bar
+    html+=`<div style="background:var(--bg3);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="toggleL3('${ticker}')">
+      <div class="xbtn${l3?' open':''}" style="margin-left:22px;width:14px;height:14px;font-size:9px;">${l3?'−':'+'}</div>
+      <span style="font-family:var(--mono);font-size:9px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;">Sub-Scores &amp; Raw Audit — click to ${l3?'collapse':'expand'}</span>
+    </div>`;
+
+    // Row 1: Exhaustion | Momentum | Valuation | Analyst
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-top:1px solid var(--border);">`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ff3d57;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(255,61,87,.18);">↑ EXHAUSTION &nbsp;<span style="opacity:.55;font-size:8px;">HIGH=RED=BAD</span></div>
+      ${sbRow('RSI (14)', s.raw.rsi, true)}
+      ${sbRow('Dist 20DMA', s.raw.d20, true)}
+      ${sbRow('Decay', s.decay, true)}
+    </div>`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ MOMENTUM inputs</div>
+      ${sbRow('Slope Strength', s.slope, false)}
+      ${sbRow('RSI Trend', s.rsiTrnd, false)}
+      ${sbRow('MACD Impulse', s.macd, false)}
+      ${sbRow('Mom. Holding', 100-s.decay, false)}
+    </div>`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ffd740;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(255,215,64,.18);">↑ VALUATION inputs</div>
+      ${sbRow('PE vs Sector', s.pevs, false)}
+      ${sbRow('PE vs Market', s.pevm, false)}
+      ${sbRow('EV/EBITDA', s.evs, false)}
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">${s.raw.industry||'Unknown'} · Benchmark ${s.raw.sectorPE}×</div>
+    </div>`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00e676;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,230,118,.18);">↑ ANALYST &nbsp;<span style="opacity:.55;font-size:8px;">FMP</span></div>
+      ${s.analystHasData ? sbRow('Score', s.analyst, false) : '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:6px;">Score: N/A (FMP)</div>'}
+      <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Consensus $</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.raw.ptMean!=='N/A'?'$'+s.raw.ptMean:'N/A'}</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Upside</span><span style="font-family:var(--mono);font-size:10px;color:${s.analystUpside>0?'var(--green)':'var(--red)'};">${s.analystHasData?(s.analystUpside>0?'+':'')+s.analystUpside.toFixed(1)+'%':'N/A'}</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Buy/Hold/Sell</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.raw.recBuy} / ${s.raw.recHold} / ${s.raw.recSell}</span></div>
+    </div>`;
+
+    html+=`</div>`; // end row 1
+
+    // Row 2: Smart $ | Context | Readiness | UW
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-top:1px solid var(--border);">`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#a78bfa;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(167,139,250,.18);">↑ SMART $ &nbsp;<span style="opacity:.55;font-size:8px;">volume proxy</span></div>
+      ${sbRow('Block Proxy', s.block, false)}
+      ${sbRow('Vol Ratio', Math.round(s.volRat*50), false)}
+      ${sbRow('Accumulation', s.accum, false)}
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">Upgrades to real dark pool data when UW connected</div>
+    </div>`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7a94aa;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(122,148,170,.18);">↑ CONTEXT &nbsp;<span style="opacity:.55;font-size:8px;">FMP</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Next Earnings</span><span style="font-family:var(--mono);font-size:10px;color:${s.earn&&s.earn.days<=14?'var(--yellow)':'var(--text2)'};">${s.earn?s.earn.date+' · '+s.earn.days+'d':' N/A'}</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Insider 90d Net</span><span style="font-family:var(--mono);font-size:10px;color:${s.insider.net>5000?'var(--green)':s.insider.net<-5000?'var(--red)':'var(--text2)'};">${s.insider.net!==0?(s.insider.net>0?'+':'')+s.insider.net.toLocaleString():'No activity'}</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Insider Signal</span><span style="font-family:var(--mono);font-size:10px;">${s.insider.label}</span></div>
+    </div>`;
+
+    html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ READINESS inputs</div>
+      ${sbRow('Momentum', s.mom, false)}
+      ${sbRow('52W Room', 100-s.raw.r52, false)}
+      ${sbRow('Slope', s.slope, false)}
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">52W position: ${s.raw.r52}% (lower = more room to run)</div>
+    </div>`;
+
+    html+=`<div style="background:rgba(124,77,255,.03);padding:14px 18px;border-left:1px solid rgba(124,77,255,.15);">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7c4dff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(124,77,255,.2);">↑ UNUSUAL WHALES</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);line-height:2.1;">
+        ⚡ Net Premium 3D<br>⚡ Sweep Bias<br>⚡ OI Bias (30-90 DTE)<br>⚡ Dark Pool Bias<br>⚡ Call Wall Distance<br>⚡ IV Context
+      </div>
+      <span class="ub" style="margin-top:10px;display:inline-flex;">Paste UW key in ⚙️ Settings</span>
+    </div>`;
+
+    html+=`</div>`; // end row 2
 
     // LEVEL 3
     if(l3){
