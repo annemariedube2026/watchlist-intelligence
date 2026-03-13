@@ -192,7 +192,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v5.2 · Finnhub + Yahoo · GitHub Pages</div>
+      <div class="logo-sub">v5.3 · Finnhub + Yahoo · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -293,6 +293,21 @@ async function yahooCandles(ticker) {
   var fc=[],fv=[];
   for(var i=0;i<c.length;i++){if(c[i]!=null){fc.push(c[i]);fv.push(v[i]||0);}}
   return {c:fc,v:fv,s:'yahoo'};
+}
+
+async function loadTickerWithRetry(ticker, attempt) {
+  attempt = attempt || 1;
+  try {
+    await loadTicker(ticker);
+    // If still errored with 429, retry after longer wait
+    if(DATA[ticker] && DATA[ticker].err && DATA[ticker].err.indexOf('429') >= 0 && attempt < 3) {
+      console.log(ticker + ' got 429, retry ' + attempt + ' after 3s...');
+      await new Promise(r=>setTimeout(r,3000 * attempt));
+      await loadTickerWithRetry(ticker, attempt + 1);
+    }
+  } catch(e) {
+    DATA[ticker] = {err: e.message};
+  }
 }
 
 async function loadTicker(ticker) {
@@ -421,8 +436,8 @@ async function refreshAll(){
   document.getElementById('tbody').innerHTML=WATCHLIST.map(t=>
     `<div class="lrow"><div class="spinner"></div>Loading ${t}…</div>`).join('');
   for(var i=0;i<WATCHLIST.length;i++){
-    await loadTicker(WATCHLIST[i]);
-    await new Promise(r=>setTimeout(r,350)); // 350ms delay between tickers to avoid 429
+    await loadTickerWithRetry(WATCHLIST[i]);
+    await new Promise(r=>setTimeout(r,800)); // 800ms between tickers for free tier rate limit
   }
   btn.classList.remove('spinning');
   document.getElementById('lupd').textContent='Updated: '+new Date().toLocaleTimeString();
@@ -669,8 +684,28 @@ function sbRow(lbl,v,inv){
 function sigClass(s){return{BUY:'s-buy',ACCUMULATE:'s-acc',NEUTRAL:'s-neu',TRIM:'s-trim',SELL:'s-sell'}[s]||'s-neu';}
 function sigDot(s){return{BUY:'🟢',ACCUMULATE:'🔵',NEUTRAL:'⚪',TRIM:'🟠',SELL:'🔴'}[s]||'⚪';}
 
-function aitem(lbl,val,form,isUW){
-  return`<div class="aitem${isUW?' uw':''}"><div class="albl${isUW?' " style="color:var(--purple)':'"'}>${lbl}</div><div class="aval"${isUW?' style="color:var(--text3)"':''}>${val}</div><div class="aform">${form}</div></div>`;
+// cat: 'exhaust'=red, 'mom'=blue, 'val'=yellow, 'analyst'=green, 'smart'=purple, 'context'=gray, 'uw'=purple-dark
+var CAT_COLORS = {
+  exhaust:'#ff3d57', mom:'#00d4ff', val:'#ffd740',
+  analyst:'#00e676', smart:'#a78bfa', context:'#7a94aa', uw:'#7c4dff'
+};
+var CAT_LABELS = {
+  exhaust:'EXHAUSTION', mom:'MOMENTUM', val:'VALUATION',
+  analyst:'ANALYST', smart:'SMART $', context:'CONTEXT', uw:'UW PENDING'
+};
+function aitem(lbl,val,form,cat){
+  cat = cat || 'context';
+  var isUW = cat === 'uw';
+  var c = CAT_COLORS[cat] || '#7a94aa';
+  var bg = isUW ? 'rgba(124,77,255,.04)' : 'var(--bg3)';
+  var bc = isUW ? 'rgba(124,77,255,.18)' : 'var(--border)';
+  return`<div class="aitem" style="background:${bg};border-color:${bc};">` +
+    `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">` +
+    `<div class="albl" style="color:${c};">${lbl}</div>` +
+    `<div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:${c};opacity:.6;">${CAT_LABELS[cat]}</div>` +
+    `</div>` +
+    `<div class="aval" style="color:${isUW?'var(--text3)':'var(--text)'};">${val}</div>` +
+    `<div class="aform">${form}</div></div>`;
 }
 
 function renderTable(){
@@ -787,38 +822,38 @@ function renderSection(ticker){
       html+=`<div class="row3">
         <div class="audit-hdr">🔬 Raw Audit Data — ${ticker}</div>
         <div class="audit-grid">
-          ${aitem('Last Price','$'+s.raw.price,'Finnhub /quote → c (current price)')}
-          ${aitem('Prev Close','$'+s.raw.pc,'Finnhub /quote → pc')}
-          ${aitem('RSI (14)',s.raw.rsi,'100 − 100/(1+AvgGain/AvgLoss) over 14 days')}
-          ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM')}
-          ${aitem('EV/EBITDA',s.raw.ev,'Finnhub /stock/metric → ev/ebitda')}
-          ${aitem('52W High','$'+s.raw.h52,'Finnhub metric → 52WeekHigh')}
-          ${aitem('52W Low','$'+s.raw.l52,'Finnhub metric → 52WeekLow')}
-          ${aitem('52W Range%',s.raw.r52+'%','(Price−52WLow)/(52WHigh−52WLow)×100')}
-          ${aitem('Dist 20DMA',s.raw.d20+'pts','|Price−SMA20|/SMA20×100 scaled 0–100')}
-          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)','yahoo=real 90d | fallback=estimated')}
-          ${aitem('Slope Score',s.slope,'Linear regression slope 20D, normalized 0–100')}
-          ${aitem('MACD Score',s.macd,'(EMA12−EMA26)/price×600+50, clamped 0–100')}
-          ${aitem('Block Proxy',s.block,'UpVol/(UpVol+DnVol)×100 over 20 days')}
-          ${aitem('Accum Score',s.accum,'(Price>MA20?60:40)+(BlockProxy−50)×0.4')}
-          ${aitem('Vol Ratio',s.volRat+'×','Avg 5d vol ÷ Avg 20d vol')}
-          ${aitem('Analyst Score',s.analyst,'%Buy×100 − %Sell×30 + 30 + upside×1.5')}
-          ${aitem('Price Target Mean','$'+s.raw.ptMean,'Finnhub /stock/price-target → targetMean')}
-          ${aitem('Price Target High','$'+s.raw.ptHigh,'Finnhub /stock/price-target → targetHigh')}
-          ${aitem('Price Target Low','$'+s.raw.ptLow,'Finnhub /stock/price-target → targetLow')}
-          ${aitem('Analyst Upside',s.analystUpside.toFixed(1)+'%','(targetMean−price)/price×100')}
-          ${aitem('Rec: Buy',s.raw.recBuy,'Finnhub strongBuy + buy count')}
-          ${aitem('Rec: Hold',s.raw.recHold,'Finnhub hold count')}
-          ${aitem('Rec: Sell',s.raw.recSell,'Finnhub strongSell + sell count')}
-          ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','Finnhub /calendar/earnings → next date')}
-          ${aitem('Days to Earn',s.earn?s.earn.days+'d':'N/A','Days until next earnings report')}
-          ${aitem('Insider Net 90d',(s.raw.insiderNet||0).toLocaleString(),'Net shares: Purchases − Sales last 90 days')}
-          ${aitem('⚡ UW: Net Prem 3D','Pending','Σ(CallPrem−PutPrem) over 3 days',true)}
-          ${aitem('⚡ UW: Sweep Bias','Pending','CallSweepPrem ÷ TotalSweepPrem',true)}
-          ${aitem('⚡ UW: OI Bias','Pending','CallOI_Δ − PutOI_Δ (30–90 DTE)',true)}
-          ${aitem('⚡ UW: Dark Pool','Pending','Net notional + % prints above spot',true)}
-          ${aitem('⚡ UW: Call Wall','Pending','(CallWall−Spot)/Spot×100',true)}
-          ${aitem('⚡ UW: IV Context','Pending','IVRank + IV vs 20d avg',true)}
+          ${aitem('Last Price','$'+s.raw.price,'Finnhub /quote → c (current price)','context')}
+          ${aitem('Prev Close','$'+s.raw.pc,'Finnhub /quote → pc','context')}
+          ${aitem('RSI (14)',s.raw.rsi,'100 − 100/(1+AvgGain/AvgLoss) over 14 days','exhaust')}
+          ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM','val')}
+          ${aitem('EV/EBITDA',s.raw.ev,'Finnhub /stock/metric → ev/ebitda','val')}
+          ${aitem('52W High','$'+s.raw.h52,'Finnhub metric → 52WeekHigh','val')}
+          ${aitem('52W Low','$'+s.raw.l52,'Finnhub metric → 52WeekLow','val')}
+          ${aitem('52W Range%',s.raw.r52+'%','(Price−52WLow)/(52WHigh−52WLow)×100','val')}
+          ${aitem('Dist 20DMA',s.raw.d20+'pts','|Price−SMA20|/SMA20×100 scaled 0–100 → feeds Exhaustion','exhaust')}
+          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)','yahoo=real 90d | fallback=estimated','context')}
+          ${aitem('Slope Score',s.slope,'Linear regression slope 20D, normalized 0–100','mom')}
+          ${aitem('MACD Score',s.macd,'(EMA12−EMA26)/price×600+50, clamped 0–100','mom')}
+          ${aitem('Block Proxy',s.block,'UpVol/(UpVol+DnVol)×100 over 20 days','smart')}
+          ${aitem('Accum Score',s.accum,'(Price>MA20?60:40)+(BlockProxy−50)×0.4','smart')}
+          ${aitem('Vol Ratio',s.volRat+'×','Avg 5d vol ÷ Avg 20d vol','smart')}
+          ${aitem('Analyst Score',s.analyst,'%Buy×100 − %Sell×30 + 30 + upside×1.5','analyst')}
+          ${aitem('Price Target Mean','$'+s.raw.ptMean,'Finnhub /stock/price-target → targetMean','analyst')}
+          ${aitem('Price Target High','$'+s.raw.ptHigh,'Finnhub /stock/price-target → targetHigh','analyst')}
+          ${aitem('Price Target Low','$'+s.raw.ptLow,'Finnhub /stock/price-target → targetLow','analyst')}
+          ${aitem('Analyst Upside',s.analystUpside.toFixed(1)+'%','(targetMean−price)/price×100','analyst')}
+          ${aitem('Rec: Buy',s.raw.recBuy,'Finnhub strongBuy + buy count','analyst')}
+          ${aitem('Rec: Hold',s.raw.recHold,'Finnhub hold count','analyst')}
+          ${aitem('Rec: Sell',s.raw.recSell,'Finnhub strongSell + sell count','analyst')}
+          ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','Finnhub /calendar/earnings → next date','context')}
+          ${aitem('Days to Earn',s.earn?s.earn.days+'d':'N/A','Days until next earnings report','context')}
+          ${aitem('Insider Net 90d',(s.raw.insiderNet||0).toLocaleString(),'Net shares: Purchases − Sales last 90 days','context')}
+          ${aitem('⚡ UW: Net Prem 3D','Pending','Σ(CallPrem−PutPrem) over 3 days','uw')}
+          ${aitem('⚡ UW: Sweep Bias','Pending','CallSweepPrem ÷ TotalSweepPrem','uw')}
+          ${aitem('⚡ UW: OI Bias','Pending','CallOI_Δ − PutOI_Δ (30–90 DTE)','uw')}
+          ${aitem('⚡ UW: Dark Pool','Pending','Net notional + % prints above spot','uw')}
+          ${aitem('⚡ UW: Call Wall','Pending','(CallWall−Spot)/Spot×100','uw')}
+          ${aitem('⚡ UW: IV Context','Pending','IVRank + IV vs 20d avg','uw')}
         </div></div>`;
     }
   }
