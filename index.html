@@ -192,7 +192,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v5.1 · Finnhub + Yahoo · GitHub Pages</div>
+      <div class="logo-sub">v5.2 · Finnhub + Yahoo · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -420,7 +420,10 @@ async function refreshAll(){
   var btn=document.getElementById('refBtn');btn.classList.add('spinning');
   document.getElementById('tbody').innerHTML=WATCHLIST.map(t=>
     `<div class="lrow"><div class="spinner"></div>Loading ${t}…</div>`).join('');
-  for(var i=0;i<WATCHLIST.length;i++) await loadTicker(WATCHLIST[i]);
+  for(var i=0;i<WATCHLIST.length;i++){
+    await loadTicker(WATCHLIST[i]);
+    await new Promise(r=>setTimeout(r,350)); // 350ms delay between tickers to avoid 429
+  }
   btn.classList.remove('spinning');
   document.getElementById('lupd').textContent='Updated: '+new Date().toLocaleTimeString();
   renderTable();
@@ -704,8 +707,8 @@ function renderSection(ticker){
   }
 
   // Insider cell
-  var insHtml='<span class="ins-neu">—</span>';
-  if(s.insider&&s.insider.label!=='N/A'){
+  var insHtml='<span style="font-family:var(--mono);font-size:9px;color:var(--text3);">—</span>';
+  if(s.insider&&s.insider.net!==0){
     var ins=s.insider;
     var icls=ins.net>5000?'ins-bull':ins.net<-5000?'ins-bear':'ins-neu';
     insHtml=`<span class="${icls}" style="font-size:10px;">${ins.label}</span>`;
@@ -753,19 +756,28 @@ function renderSection(ticker){
       <div class="sbar-row"><span class="sbar-lbl">Signal</span><span style="font-family:var(--mono);font-size:10px;">${s.insider.label}</span></div>
     </div></div>`;
     // Exhaustion sub
-    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">${sbRow('RSI',s.raw.rsi,true)}${sbRow('Dist20',s.raw.d20,true)}${sbRow('Decay',s.decay,true)}</div></div>`;
+    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
+      <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--red);margin-bottom:5px;opacity:.8;">↑ EXHAUSTION inputs</div>
+      ${sbRow('RSI',s.raw.rsi,true)}${sbRow('Dist20DMA',s.raw.d20,true)}${sbRow('Decay',s.decay,true)}</div></div>`;
     // Momentum sub
-    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">${sbRow('Slope',s.slope)}${sbRow('RSI↑',s.rsiTrnd)}${sbRow('MACD',s.macd)}${sbRow('Decay↓',100-s.decay)}</div></div>`;
+    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
+      <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:5px;opacity:.8;">↑ MOMENTUM inputs</div>
+      ${sbRow('Slope',s.slope)}${sbRow('RSI Trend',s.rsiTrnd)}${sbRow('MACD',s.macd)}${sbRow('No Decay',100-s.decay)}</div></div>`;
     // Valuation sub
-    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">${sbRow('PE/Sec',s.pevs)}${sbRow('PE/Mkt',s.pevm)}${sbRow('EV/EB',s.evs)}</div></div>`;
+    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
+      <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:5px;opacity:.8;">↑ VALUATION inputs</div>
+      ${sbRow('PE/Sector',s.pevs)}${sbRow('PE/Market',s.pevm)}${sbRow('EV/EBITDA',s.evs)}</div></div>`;
     // Analyst sub
     html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
+      <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--green);margin-bottom:5px;opacity:.8;">↑ ANALYST inputs</div>
       ${sbRow('Score',s.analyst)}
       <div class="sbar-row"><span class="sbar-lbl">Target</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">$${s.raw.ptMean}</span></div>
       <div class="sbar-row"><span class="sbar-lbl">Upside</span><span style="font-family:var(--mono);font-size:10px;color:${s.analystUpside>0?'var(--green)':'var(--red)'};">${s.analystUpside>0?'+':''}${s.analystUpside.toFixed(1)}%</span></div>
     </div></div>`;
     // Smart $ sub
-    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">${sbRow('Block',s.block)}${sbRow('VolRat',Math.round(s.volRat*50))}${sbRow('Accum',s.accum)}</div></div>`;
+    html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
+      <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);margin-bottom:5px;opacity:.8;">↑ SMART $ inputs (volume proxy)</div>
+      ${sbRow('Block',s.block)}${sbRow('VolRatio',Math.round(s.volRat*50))}${sbRow('Accum',s.accum)}</div></div>`;
     html+=`<div class="cell" style="font-size:11px;color:var(--text3);">—</div>`;
     html+=`<div class="cell"><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">UW Flow<br><span class="ub" style="margin-top:3px;">Pending</span></span></div>`;
     html+=`</div>`;
@@ -906,9 +918,9 @@ function buildGlossary(){
 }
 
 function openGL(){
-  var w=window.open('','_blank');
-  w.document.write(buildGlossary());
-  w.document.close();
+  var blob = new Blob([buildGlossary()], {type:'text/html'});
+  var url  = URL.createObjectURL(blob);
+  window.open(url,'_blank','noopener');
 }
 
 // ── START ─────────────────────────────────────
