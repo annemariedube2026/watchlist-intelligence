@@ -192,7 +192,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v5.3 · Finnhub + Yahoo · GitHub Pages</div>
+      <div class="logo-sub">v5.6 · Finnhub + Yahoo · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -243,7 +243,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   </div>
   <!-- Column headers — sticky -->
   <div class="col-hdr" id="colHdr">
-    <div class="th th-noSort" style="grid-column:1;">TICKER</div>
+    <div class="th" onclick="sortBy('ticker')" id="th-ticker" style="grid-column:1;">TICKER</div>
     <div class="th" onclick="sortBy('price')" id="th-price">PRICE</div>
     <div class="th" onclick="sortBy('chg')" id="th-chg">CHG%</div>
     <div class="th" onclick="sortBy('earn')" id="th-earn" title="Days to next earnings">EARN</div>
@@ -487,13 +487,56 @@ function calcBlockProxy(closes,vols){
   var tot=up+dn;return tot?clamp((up/tot)*100,0,100):50;
 }
 
+// Sector-appropriate PE benchmarks
+// Source: approximate long-run sector median PE ratios
+var SECTOR_PE = {
+  'Technology':          35,
+  'Information Technology': 35,
+  'Software':            38,
+  'Semiconductors':      30,
+  'Health Care':         22,
+  'Healthcare':          22,
+  'Biotechnology':       28,
+  'Pharmaceuticals':     20,
+  'Financial Services':  14,
+  'Financials':          14,
+  'Banks':               12,
+  'Insurance':           13,
+  'Consumer Discretionary': 25,
+  'Consumer Staples':    22,
+  'Communication Services': 22,
+  'Energy':              14,
+  'Utilities':           18,
+  'Real Estate':         35,
+  'Industrials':         22,
+  'Materials':           18,
+  'default':             21  // S&P 500 broad average
+};
+
+function getSectorPE(finnhubIndustry) {
+  if(!finnhubIndustry) return SECTOR_PE['default'];
+  // Try direct match first
+  if(SECTOR_PE[finnhubIndustry]) return SECTOR_PE[finnhubIndustry];
+  // Try partial match
+  for(var key in SECTOR_PE) {
+    if(finnhubIndustry.toLowerCase().indexOf(key.toLowerCase()) >= 0) return SECTOR_PE[key];
+  }
+  return SECTOR_PE['default'];
+}
+
 // Analyst score from recommendation trend + price target
 function calcAnalyst(recTrend, priceTarget, currentPrice) {
-  var score = 50;
-  // Recommendation trend — latest month
-  if(recTrend && recTrend.length > 0) {
+  var hasRec = recTrend && recTrend.length > 0;
+  var hasPT  = priceTarget && priceTarget.targetMean && currentPrice > 0;
+
+  // If no data at all, return neutral 50
+  if(!hasRec && !hasPT) return {score:50, upside:0, hasData:false};
+
+  var score = 50, upside = 0;
+
+  if(hasRec) {
     var latest = recTrend[0];
-    var buy = (latest.strongBuy||0) + (latest.buy||0);
+    var buy  = (latest.strongBuy||0)  + (latest.buy||0);
     var sell = (latest.strongSell||0) + (latest.sell||0);
     var hold = latest.hold||0;
     var total = buy + sell + hold;
@@ -503,13 +546,15 @@ function calcAnalyst(recTrend, priceTarget, currentPrice) {
       score = clamp(bullPct*100 - bearPct*30 + 30, 0, 100);
     }
   }
-  // Price target upside
-  var upside = 0;
-  if(priceTarget && priceTarget.targetMean && currentPrice > 0) {
+
+  if(hasPT) {
     upside = (priceTarget.targetMean - currentPrice) / currentPrice * 100;
-    score = clamp(score + upside * 1.5, 0, 100);
+    // Only blend upside if we have it — weight it less if no rec data
+    var upsideWeight = hasRec ? 1.5 : 0.8;
+    score = clamp(score + upside * upsideWeight, 0, 100);
   }
-  return {score:Math.round(score), upside:upside};
+
+  return {score:Math.round(score), upside:upside, hasData:true};
 }
 
 // Days to next earnings
@@ -557,11 +602,17 @@ function scores(ticker) {
   var decay=calcDecay(closes);
   var mom=clamp(slope*.30+rsiTrnd*.25+macd*.30+(100-decay)*.15,0,100);
 
-  // Valuation
+  // Valuation — sector-aware PE benchmarks
   var pe=mm.peTTM||null,ev=mm['ev/ebitda']||null;
-  var pevs=pe?clamp(100-(pe/25)*30,0,100):50;
-  var pevm=pe?clamp(100-(pe/21)*25,0,100):50;
-  var evs=ev?clamp(100-(ev/20)*35,0,100):50;
+  var industry=(d.profile&&d.profile.finnhubIndustry)||'';
+  var sectorPE=getSectorPE(industry);
+  var marketPE=21; // S&P 500 long-run average
+  // Score: 100=very cheap, 50=fairly valued at sector avg, 0=extremely expensive
+  // Score of 50 when PE = sector benchmark; drops as PE exceeds benchmark
+  var pevs=pe?clamp(100-((pe/sectorPE-0.5)*80),0,100):50;
+  var pevm=pe?clamp(100-((pe/marketPE-0.5)*70),0,100):50;
+  // EV/EBITDA: sector-agnostic, 15x = fair, 25x = stretched, 8x = cheap
+  var evs=ev?clamp(100-((ev/15-0.5)*60),0,100):50;
   var val=clamp(pevs*.40+pevm*.35+evs*.25,0,100);
 
   // Smart Money
@@ -605,14 +656,14 @@ function scores(ticker) {
     val:Math.round(val),pevs:Math.round(pevs),pevm:Math.round(pevm),evs:Math.round(evs),
     smart:Math.round(smart),block:Math.round(block),accum:Math.round(accum),
     volRat:Math.round(volRat*100)/100,
-    analyst:analystData.score,analystUpside:analystData.upside,
+    analyst:analystData.score,analystUpside:analystData.upside,analystHasData:analystData.hasData,
     earn:earnData,insider:insiderData,
     sig,
     raw:{
       rsi:Math.round(rsiNow),pe:pe?pe.toFixed(1):'N/A',ev:ev?ev.toFixed(1):'N/A',
       h52:h52?h52.toFixed(2):'N/A',l52:l52?l52.toFixed(2):'N/A',
       r52:Math.round(r52),d20:Math.round(d20dma),candles:closes.length,
-      candleSrc:c.s||'unknown',price,pc:q.pc||0,
+      candleSrc:c.s||'unknown',price,pc:q.pc||0,sectorPE:sectorPE,industry:industry||'Unknown',
       ptMean:d.priceTarget?.targetMean?.toFixed(2)||'N/A',
       ptHigh:d.priceTarget?.targetHigh?.toFixed(2)||'N/A',
       ptLow:d.priceTarget?.targetLow?.toFixed(2)||'N/A',
@@ -648,6 +699,7 @@ function sortBy(col) {
 function getSortVal(ticker,col){
   var s=scores(ticker);if(!s)return-999;
   switch(col){
+    case'ticker':return ticker; // string sort handled separately
     case'price':return s.price;
     case'chg':return s.chg;
     case'exhaustion':return s.exhaustion;
@@ -684,6 +736,18 @@ function sbRow(lbl,v,inv){
 function sigClass(s){return{BUY:'s-buy',ACCUMULATE:'s-acc',NEUTRAL:'s-neu',TRIM:'s-trim',SELL:'s-sell'}[s]||'s-neu';}
 function sigDot(s){return{BUY:'🟢',ACCUMULATE:'🔵',NEUTRAL:'⚪',TRIM:'🟠',SELL:'🔴'}[s]||'⚪';}
 
+// RSI-specific color: overbought=yellow(caution), oversold=green(opportunity), middle=blue(neutral)
+function rsiColor(rsi) {
+  if(rsi >= 70) return '#ffd740'; // overbought — caution for new entries
+  if(rsi <= 30) return '#00e676'; // oversold — potential bounce opportunity
+  return '#00d4ff';               // neutral range
+}
+function rsiNote(rsi) {
+  if(rsi >= 70) return ' ⚠ Overbought — avoid new long entries';
+  if(rsi <= 30) return ' ✓ Oversold — potential bounce setup';
+  return ' Neutral range (30–70)';
+}
+
 // cat: 'exhaust'=red, 'mom'=blue, 'val'=yellow, 'analyst'=green, 'smart'=purple, 'context'=gray, 'uw'=purple-dark
 var CAT_COLORS = {
   exhaust:'#ff3d57', mom:'#00d4ff', val:'#ffd740',
@@ -715,6 +779,7 @@ function renderTable(){
   if(SORT_COL){
     list.sort((a,b)=>{
       var av=getSortVal(a,SORT_COL),bv=getSortVal(b,SORT_COL);
+      if(typeof av==='string'&&typeof bv==='string') return av.localeCompare(bv)*SORT_DIR;
       return(av-bv)*SORT_DIR;
     });
   }
@@ -724,7 +789,17 @@ function renderTable(){
 function renderSection(ticker){
   var d=DATA[ticker];
   if(!d) return`<div class="lrow"><div class="spinner"></div>Loading ${ticker}…</div>`;
-  if(d.err) return`<div class="erow">⚠ ${ticker}: ${d.err}</div>`;
+  if(d.err) {
+    // Show a clean error row — distinguish rate limit vs truly missing
+    var errType = d.err.indexOf('429') >= 0 ? '⏱ Rate limited — hit Refresh All to retry' :
+                  d.err.indexOf('403') >= 0 ? '🔒 Requires Finnhub upgrade' :
+                  d.err.indexOf('404') >= 0 ? '❓ Ticker not found in Finnhub (ETF/leveraged?)' :
+                  '⚠ ' + d.err;
+    return`<div class="erow" style="display:flex;align-items:center;gap:12px;">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);">${ticker}</span>
+      <span>${errType}</span>
+    </div>`;
+  }
   var s=scores(ticker);
   if(!s) return`<div class="erow">⚠ ${ticker}: Could not compute scores.</div>`;
   var prof=d.profile||{};
@@ -764,7 +839,7 @@ function renderSection(ticker){
   html+=scCell(s.exhaustion,true); // inverted — high exhaust = red
   html+=scCell(s.mom,false);
   html+=scCell(s.val,false);
-  html+=scCell(s.analyst,false);
+  html+=s.analystHasData?scCell(s.analyst,false):`<div class="cell"><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">— (upgrade)</span></div>`;
   html+=scCell(s.smart,false);
   html+=scCell(s.readiness,false);
   html+=`<div class="cell"><span class="sig ${sigClass(s.sig)}">${sigDot(s.sig)} ${s.sig}</span></div>`;
@@ -793,11 +868,11 @@ function renderSection(ticker){
     // Exhaustion sub
     html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
       <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--red);margin-bottom:5px;opacity:.8;">↑ EXHAUSTION inputs</div>
-      ${sbRow('RSI',s.raw.rsi,true)}${sbRow('Dist20DMA',s.raw.d20,true)}${sbRow('Decay',s.decay,true)}</div></div>`;
+      ${sbRow('RSI',s.raw.rsi,true)}${sbRow('Stretch',s.raw.d20,true)}${sbRow('Decay↑Bad',s.decay,true)}</div></div>`;
     // Momentum sub
     html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
       <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:5px;opacity:.8;">↑ MOMENTUM inputs</div>
-      ${sbRow('Slope',s.slope)}${sbRow('RSI Trend',s.rsiTrnd)}${sbRow('MACD',s.macd)}${sbRow('No Decay',100-s.decay)}</div></div>`;
+      ${sbRow('Slope',s.slope)}${sbRow('RSI Trend',s.rsiTrnd)}${sbRow('MACD',s.macd)}${sbRow('Mom.Hold',100-s.decay)}</div></div>`;
     // Valuation sub
     html+=`<div class="cell" style="padding:8px 11px;"><div style="width:100%;">
       <div style="font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:5px;opacity:.8;">↑ VALUATION inputs</div>
@@ -820,19 +895,32 @@ function renderSection(ticker){
     // LEVEL 3 — raw audit
     if(l3){
       html+=`<div class="row3">
-        <div class="audit-hdr">🔬 Raw Audit Data — ${ticker}</div>
+        <div class="audit-hdr">🔬 Raw Audit Data — ${ticker} &nbsp;<span style="font-size:9px;color:var(--text3);font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;">🔴=High is bad for trader (exhaust/decay) &nbsp;🟢=High is good (momentum/smart money) &nbsp;🟡=Valuation &nbsp;🟣=Smart $ proxy</span></div>
         <div class="audit-grid">
           ${aitem('Last Price','$'+s.raw.price,'Finnhub /quote → c (current price)','context')}
           ${aitem('Prev Close','$'+s.raw.pc,'Finnhub /quote → pc','context')}
-          ${aitem('RSI (14)',s.raw.rsi,'100 − 100/(1+AvgGain/AvgLoss) over 14 days','exhaust')}
-          ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM','val')}
+          ${(function(){
+  var rsi=s.raw.rsi;
+  var rc=rsiColor(rsi);
+  var rn=rsiNote(rsi);
+  return '<div class="aitem" style="background:var(--bg3);border-color:var(--border);">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">'+
+    '<div class="albl" style="color:'+rc+';">RSI (14)</div>'+
+    '<div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:'+rc+';opacity:.6;">EXHAUSTION</div>'+
+    '</div>'+
+    '<div class="aval" style="color:'+rc+';">'+rsi+'</div>'+
+    '<div class="aform">'+rn+'<br>Formula: 100 − 100/(1+AvgGain/AvgLoss) over 14 days</div></div>';
+})()}
+          ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM','val')+
+          aitem('Sector PE Benchmark',s.raw.sectorPE+'×','Expected PE for '+s.raw.industry+' sector — score 50 when PE equals this benchmark','val')}
           ${aitem('EV/EBITDA',s.raw.ev,'Finnhub /stock/metric → ev/ebitda','val')}
           ${aitem('52W High','$'+s.raw.h52,'Finnhub metric → 52WeekHigh','val')}
           ${aitem('52W Low','$'+s.raw.l52,'Finnhub metric → 52WeekLow','val')}
           ${aitem('52W Range%',s.raw.r52+'%','(Price−52WLow)/(52WHigh−52WLow)×100','val')}
-          ${aitem('Dist 20DMA',s.raw.d20+'pts','|Price−SMA20|/SMA20×100 scaled 0–100 → feeds Exhaustion','exhaust')}
-          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)','yahoo=real 90d | fallback=estimated','context')}
-          ${aitem('Slope Score',s.slope,'Linear regression slope 20D, normalized 0–100','mom')}
+          ${aitem('Dist 20DMA',s.raw.d20+'pts','Distance price has stretched from 20-day moving average. HIGH = overextended (red = trim/avoid entry). LOW = close to MA = cleaner entry zone.','exhaust')}
+          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)','yahoo=real 90d history | fallback=synthetic estimated curve — momentum scores less reliable',s.raw.candleSrc==='yahoo'?'analyst':'exhaust')}
+          ${aitem('Slope Score',s.slope,'Linear regression slope 20D, normalized 0–100','mom')+
+          aitem('Decay Score',s.decay,'HIGH = momentum fading (BAD for new entries / reason to trim). LOW = momentum still strong. Red when high is correct trader logic.','exhaust')}
           ${aitem('MACD Score',s.macd,'(EMA12−EMA26)/price×600+50, clamped 0–100','mom')}
           ${aitem('Block Proxy',s.block,'UpVol/(UpVol+DnVol)×100 over 20 days','smart')}
           ${aitem('Accum Score',s.accum,'(Price>MA20?60:40)+(BlockProxy−50)×0.4','smart')}
@@ -870,14 +958,14 @@ var GL=[
   {sec:'Composite Scores',items:[
     {n:'Setup Score',t:'Composite',s:'finnhub',d:'Blended score (0–100) summarizing whether the technical setup is attractive. Above ~70 is structurally interesting for a new position.',f:'Momentum×35% + Valuation×25% + Smart Money×25% + Readiness×15%'},
     {n:'Trade Readiness',t:'Execution Timing',s:'finnhub',d:'How close the ticker is to a clean entry point. High = good timing. Low = not yet set up or already extended.',f:'Momentum×40% + (100 − 52W Range%)×30% + Slope×30%'},
-    {n:'Trade Exhaustion',t:'Risk / Late-Stage',s:'finnhub',d:'How tired or extended the current move is. HIGH IS BAD — high score means reversal risk is elevated. Color is INVERTED (red = high = danger).',f:'(RSI/100)×40% + Dist from 20DMA×40% + Decay×20%'},
+    {n:'Trade Exhaustion',t:'Risk / Late-Stage',s:'finnhub',d:'How tired or overextended the current move is. HIGH = GET OUT OR STAY OUT — price has run far from its average, RSI is elevated, momentum is fading. LOW = the move is fresh with room to run, favorable for new entries. Color INVERTED: red=high=dangerous, green=low=healthy.',f:'(RSI/100)×40% + Dist from 20DMA×40% + Decay×20%'},
   ]},
   {sec:'Momentum',items:[
     {n:'Momentum Quality',t:'Momentum',s:'yahoo',d:'How clean, persistent and directional the current price trend is. High = smooth uptrend with volume support.',f:'Slope×30% + RSI Trend×25% + MACD×30% + (100−Decay)×15%'},
     {n:'Slope Strength',t:'Momentum',s:'yahoo',d:'The angle of the price trend over the last 20 trading days. Calculated from a linear regression line through 20 daily closes. High = steep uptrend. Low = flat or declining.',f:'Linear regression slope of 20 closes, normalized: 50 + (slope/avgPrice)×4000, clamped 0–100'},
     {n:'RSI Trend',t:'Momentum',s:'yahoo',d:'Not just current RSI, but whether RSI is RISING or FALLING over the past 10 days. Rising RSI + rising price = healthy momentum. Falling RSI while price rises = warning.',f:'RSI(14) now vs RSI(14) 10 days ago: 50 + delta×2, clamped 0–100'},
     {n:'MACD Impulse',t:'Momentum',s:'yahoo',d:'Measures whether the fast moving average (12-day) is pulling away from or converging with the slow (26-day). Positive and widening = buyers in control.',f:'(EMA12 − EMA26) / lastPrice × 600 + 50, clamped 0–100'},
-    {n:'Momentum Decay',t:'Momentum',s:'yahoo',d:'Is momentum ACCELERATING or FADING? This compares the most recent 5-day move to the 20-day move. HIGH DECAY IS BAD — like a car losing speed even with foot on the gas. Color is INVERTED.',f:'Ratio of 5-day slope to 20-day slope: >1.1=15(strong), >0.8=38(holding), >0.4=62(fading), else 80(tired)'},
+    {n:'Momentum Decay',t:'Momentum',s:'yahoo',d:'Is momentum ACCELERATING or FADING? HIGH DECAY = GET OUT OR STAY OUT — the move is losing steam, like a car losing speed with foot still on the gas. LOW DECAY = momentum still strong and building, favorable for holding or entering. Color intentionally INVERTED: red=high=bad, green=low=good.',f:'Ratio of 5-day slope to 20-day slope: >1.1=score 15(strong/good), >0.8=38(holding), >0.4=62(fading/caution), else 80(exhausted/avoid)'},
   ]},
   {sec:'Valuation',items:[
     {n:'Valuation Sanity',t:'Valuation',s:'finnhub',d:'How reasonably priced the stock is vs its sector and the broad market. Higher = better value. Lower = stretched / expensive.',f:'PE vs Sector×40% + PE vs Market×35% + EV/EBITDA Stretch×25%'},
