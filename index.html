@@ -192,7 +192,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v5.0 · Finnhub + Yahoo · GitHub Pages</div>
+      <div class="logo-sub">v5.1 · Finnhub + Yahoo · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -297,17 +297,22 @@ async function yahooCandles(ticker) {
 
 async function loadTicker(ticker) {
   try {
+    // FREE tier endpoints only
     var quote   = await fhGet('/quote?symbol='+ticker);
     var profile = await fhGet('/stock/profile2?symbol='+ticker);
     var metrics = await fhGet('/stock/metric?symbol='+ticker+'&metric=all');
-    var recTrend= await fhGet('/stock/recommendation?symbol='+ticker);
-    var priceTarget = await fhGet('/stock/price-target?symbol='+ticker);
-    var earnings= await fhGet('/stock/earnings?symbol='+ticker+'&limit=4');
-    var calendar= await fhGet('/calendar/earnings?symbol='+ticker);
-    var insider = await fhGet('/stock/insider-transactions?symbol='+ticker);
 
+    // These require Finnhub paid plan — try gracefully, use null if 403
+    var recTrend=[], priceTarget={}, calendar={earningsCalendar:[]}, insider={data:[]};
+    try { recTrend   = await fhGet('/stock/recommendation?symbol='+ticker); } catch(e){ recTrend=[]; }
+    try { priceTarget= await fhGet('/stock/price-target?symbol='+ticker);  } catch(e){ priceTarget={}; }
+    try { calendar   = await fhGet('/calendar/earnings?symbol='+ticker);   } catch(e){ calendar={earningsCalendar:[]}; }
+    try { insider    = await fhGet('/stock/insider-transactions?symbol='+ticker); } catch(e){ insider={data:[]}; }
+
+    // Yahoo Finance — real candle history
     var candles;
-    try { candles = await yahooCandles(ticker);
+    try {
+      candles = await yahooCandles(ticker);
       var yd=document.getElementById('yahooDot'),yt=document.getElementById('yahooTxt');
       if(yd){yd.style.background='var(--green)';yd.style.boxShadow='0 0 6px var(--green)';}
       if(yt) yt.textContent='Yahoo: Live';
@@ -316,7 +321,7 @@ async function loadTicker(ticker) {
       candles = buildFallback(quote,metrics);
     }
 
-    DATA[ticker]={quote,profile,metrics,recTrend,priceTarget,earnings,calendar,insider,candles,err:null};
+    DATA[ticker]={quote,profile,metrics,recTrend,priceTarget,earnings:[],calendar,insider,candles,err:null};
   } catch(e) {
     DATA[ticker]={err:e.message};
   }
