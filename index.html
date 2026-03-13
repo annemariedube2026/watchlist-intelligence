@@ -94,7 +94,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 /* TABLE */
 .tbl-outer{margin:0 20px;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
 .tbl-scroll{overflow-y:auto;max-height:calc(100vh - 240px);}
-:root{--cols:190px 80px 72px 68px 90px 78px 100px 100px 100px 100px 100px 88px 130px;}
+:root{--cols:190px 80px 72px 68px 90px 78px 100px 100px 100px 88px 110px 130px;}
 
 .col-hdr{display:grid;grid-template-columns:var(--cols);background:var(--bg3);
   border-bottom:2px solid var(--border2);position:sticky;top:0;z-index:100;}
@@ -169,16 +169,6 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 .empty h3{font-family:var(--mono);font-size:13px;letter-spacing:.1em;color:var(--text2);margin-bottom:6px;}
 .empty p{font-size:12px;color:var(--text3);}
 
-/* SENTIMENT */
-.sent-bull{color:var(--green);font-family:var(--mono);font-size:11px;}
-.sent-bear{color:var(--red);font-family:var(--mono);font-size:11px;}
-.sent-neu{color:var(--text2);font-family:var(--mono);font-size:11px;}
-.earn-ok{color:var(--text2);font-family:var(--mono);font-size:11px;}
-.earn-warn{color:var(--yellow);font-family:var(--mono);font-size:11px;}
-.earn-alert{color:var(--red);font-family:var(--mono);font-size:11px;}
-.ins-bull{color:var(--green);font-family:var(--mono);font-size:11px;}
-.ins-bear{color:var(--red);font-family:var(--mono);font-size:11px;}
-.ins-neu{color:var(--text2);font-family:var(--mono);font-size:11px;}
 </style>
 </head>
 <body>
@@ -189,14 +179,13 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.1 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.3 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
     <div class="api-pill"><div class="dot" id="fhDot"></div><span id="fhTxt">Finnhub</span></div>
     <div class="api-pill"><div class="dot" id="tdDot"></div><span id="tdTxt">TwelveData</span></div>
     <div class="api-pill"><div class="dot" id="fmpDot"></div><span id="fmpTxt">FMP</span></div>
-    <div class="api-pill"><div class="dot" id="stDot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div><span>StockTwits</span></div>
     <div class="api-pill"><div class="dot" id="uwDot"></div><span>UW: Pending</span></div>
     <button class="btn-gl" onclick="openGL()">📖 Glossary</button>
     <button class="btn-gl" onclick="openSettings()" title="Add or update API keys">⚙️ Settings</button>
@@ -225,7 +214,6 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   </div>
   <div class="api-row-btn">
     <button class="btn-connect" id="connBtn" onclick="connectAPIs()">Connect &amp; Save</button>
-    <span style="font-size:11px;color:var(--text3);">StockTwits loads automatically — no key needed</span>
   </div>
   <div class="banner-note" style="margin-top:10px;">
     🔑 <a href="https://finnhub.io" target="_blank">finnhub.io</a> &nbsp;·&nbsp;
@@ -260,7 +248,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 <div class="tbl-outer">
   <div style="display:grid;grid-template-columns:var(--cols);background:var(--bg4);border-bottom:1px solid var(--border2);">
     <div style="padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--text3);border-right:1px solid var(--border);grid-column:1/6;">TICKER / PRICE / CONTEXT</div>
-    <div style="padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border-right:1px solid var(--border);grid-column:6/12;">── SCORES ───────────────────────────────────────────</div>
+    <div style="padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border-right:1px solid var(--border);grid-column:6/11;">── SCORES ───────────────────────────────────────────</div>
     <div style="padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--text3);grid-column:12/14;">SIGNAL</div>
   </div>
   <div class="col-hdr" id="colHdr">
@@ -274,7 +262,6 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="th" onclick="sortBy('val')" id="th-val">VALUATION</div>
     <div class="th" onclick="sortBy('analyst')" id="th-analyst">ANALYST</div>
     <div class="th" onclick="sortBy('smart')" id="th-smart">SMART $</div>
-    <div class="th" onclick="sortBy('sentiment')" id="th-sentiment" title="StockTwits contrarian sentiment">SENTIMENT</div>
     <div class="th" onclick="sortBy('readiness')" id="th-readiness">READINESS</div>
     <div class="th" onclick="sortBy('sig')" id="th-sig">SIGNAL</div>
   </div>
@@ -322,14 +309,6 @@ async function fmpGet(path) {
   return d;
 }
 
-async function stGet(ticker) {
-  // StockTwits — no key needed, public endpoint
-  try {
-    var r=await fetch('https://api.stocktwits.com/api/2/streams/symbol/'+ticker+'.json');
-    if(!r.ok) return null;
-    return await r.json();
-  } catch(e) { return null; }
-}
 
 // ── TWELVE DATA: candles + pre-built indicators ────────
 async function tdCandles(ticker) {
@@ -361,12 +340,11 @@ async function fmpFundamentals(ticker) {
   } catch(e) {}
 
   // Fetch fresh data — run in parallel
-  var [ratings, ptData, earningsData, insiderData] = await Promise.all([
-    fmpGet('/analyst-stock-recommendations/'+ticker+'?limit=5').catch(()=>[]),
-    fmpGet('/analyst-estimates/'+ticker+'?limit=1').catch(()=>[]),
-    fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]),
-    fmpGet('/insider-trading?symbol='+ticker+'&limit=20').catch(()=>[])
-  ]);
+  // FMP free tier: 250 calls/day, ~5 calls/minute — stagger slightly
+  var ratings = await fmpGet('/analyst-stock-recommendations/'+ticker+'?limit=5').catch(()=>[]);
+  var earningsData = await fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]);
+  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=20').catch(()=>[]);
+  var ptData = []; // unused — price target fetched separately below
 
   // Price target from FMP
   var ptResult = {};
@@ -424,28 +402,6 @@ async function fmpFundamentals(ticker) {
   return result;
 }
 
-// ── STOCKTWITS SENTIMENT ──────────────────────────────
-async function stSentiment(ticker) {
-  var data = await stGet(ticker);
-  if(!data||!data.messages||!data.messages.length) return {score:50, bull:0, bear:0, label:'—'};
-  var bull=0, bear=0, total=0;
-  data.messages.forEach(m=>{
-    if(m.entities&&m.entities.sentiment) {
-      var s=m.entities.sentiment.basic;
-      if(s==='Bullish') bull++;
-      else if(s==='Bearish') bear++;
-      total++;
-    }
-  });
-  if(!total) return {score:50, bull:0, bear:0, label:'—'};
-  var bullPct = bull/total;
-  var bearPct = bear/total;
-  // CONTRARIAN: high bullish sentiment = caution, high bearish = opportunity
-  // Score: 50=neutral, high=contrarian bullish (i.e. everyone is bearish), low=contrarian bearish (everyone is bullish)
-  var score = Math.round(clamp(50 - (bullPct-bearPct)*50, 0, 100));
-  var label = score >= 65 ? '↑ Contra-Bull' : score <= 35 ? '↓ Contra-Bear' : '— Neutral';
-  return {score, bull:Math.round(bullPct*100), bear:Math.round(bearPct*100), label, total};
-}
 
 // ── FALLBACK candles from Finnhub data ────────────────
 function buildFallback(quote, metrics) {
@@ -470,17 +426,16 @@ function buildFallback(quote, metrics) {
 // ── LOAD ONE TICKER ───────────────────────────────────
 async function loadTicker(ticker) {
   try {
-    // Parallel: Finnhub free calls + candle source + sentiment
+    // Parallel: Finnhub + candle + FMP
     var candlePromise = TD_KEY
       ? tdCandles(ticker).catch(e => { console.warn(ticker+' TD fallback:',e.message); return null; })
       : Promise.resolve(null);
 
-    var [quote, profile, metrics, candleResult, sentiment, fmpData] = await Promise.all([
+    var [quote, profile, metrics, candleResult, fmpData] = await Promise.all([
       fhGet('/quote?symbol='+ticker),
       fhGet('/stock/profile2?symbol='+ticker),
       fhGet('/stock/metric?symbol='+ticker+'&metric=all'),
       candlePromise,
-      stSentiment(ticker).catch(()=>({score:50,bull:0,bear:0,label:'—'})),
       fmpFundamentals(ticker).catch(()=>({recTrend:[],priceTarget:{},calendar:{earningsCalendar:[]},insider:{data:[]}}))
     ]);
 
@@ -505,7 +460,7 @@ async function loadTicker(ticker) {
       priceTarget:fmpData.priceTarget,
       calendar:fmpData.calendar,
       insider:fmpData.insider,
-      candles, sentiment,
+      candles,
       err:null
     };
   } catch(e) {
@@ -617,7 +572,7 @@ async function refreshAll() {
     if(prog) prog.textContent='Loading '+Math.min(i+BATCH,WATCHLIST.length)+'/'+WATCHLIST.length+'…';
     await Promise.all(batch.map(t=>loadTickerWithRetry(t)));
     renderTable();
-    if(i+BATCH<WATCHLIST.length) await new Promise(r=>setTimeout(r,1000));
+    if(i+BATCH<WATCHLIST.length) await new Promise(r=>setTimeout(r,1800));
   }
 
   btn.classList.remove('spinning');
@@ -763,10 +718,9 @@ function scores(ticker){
   var analystData=calcAnalyst(d.recTrend,d.priceTarget,price);
   var earnData=calcEarnings(d.calendar);
   var insiderData=calcInsider(d.insider);
-  var sent=d.sentiment||{score:50,bull:0,bear:0,label:'—'};
 
   var setup=clamp(mom*.30+val*.20+smart*.20+ready*.15+analystData.score*.15,0,100);
-  var sig=computeSig(mom,val,smart,exhaust,setup,analystData.score,sent.score);
+  var sig=computeSig(mom,val,smart,exhaust,setup,analystData.score);
   var chg=q.pc?(q.c-q.pc)/q.pc*100:0;
 
   return{
@@ -779,7 +733,6 @@ function scores(ticker){
     volRat:Math.round(volRat*100)/100,
     analyst:analystData.score,analystUpside:analystData.upside,analystHasData:analystData.hasData,
     earn:earnData,insider:insiderData,
-    sentiment:sent.score,sentBull:sent.bull,sentBear:sent.bear,sentLabel:sent.label,
     sig,
     raw:{
       rsi:Math.round(rsiNow),pe:pe?pe.toFixed(1):'N/A',ev:ev?ev.toFixed(1):'N/A',
@@ -797,16 +750,17 @@ function scores(ticker){
   };
 }
 
-function computeSig(mom,val,smart,exhaust,setup,analyst,sentiment){
+function computeSig(mom,val,smart,exhaust,setup,analyst){
+  // Hard overrides — extreme exhaustion caps signal regardless of other factors
+  if(exhaust>=85) return mom>=60?'TRIM':'SELL';
+  if(exhaust>=75 && mom<40) return'SELL';
   var sc=0;
   if(mom>=70)sc+=2; else if(mom>=50)sc+=1; else if(mom<30)sc-=2; else sc-=1;
   if(val>=60)sc+=1; else if(val<30)sc-=1;
   if(smart>=65)sc+=2; else if(smart>=45)sc+=1; else if(smart<30)sc-=2; else sc-=1;
-  if(exhaust>=75)sc-=2; else if(exhaust>=60)sc-=1;
+  if(exhaust>=75)sc-=3; else if(exhaust>=60)sc-=2; else if(exhaust>=50)sc-=1;
   if(setup>=75)sc+=1;
-  if(analyst>=70)sc+=1; else if(analyst<30)sc-=1;
-  // Sentiment is contrarian — high score means crowd is bearish = contrarian bullish
-  if(sentiment>=65)sc+=1; else if(sentiment<=35)sc-=1;
+  if(analyst>=70)sc+=1; else if(analyst<30&&analyst>0)sc-=1;
   if(sc>=5)return'BUY'; if(sc>=2)return'ACCUMULATE'; if(sc>=-1)return'NEUTRAL'; if(sc>=-4)return'TRIM'; return'SELL';
 }
 
@@ -829,7 +783,6 @@ function getSortVal(ticker,col){
     case'val':return s.val;
     case'analyst':return s.analyst;
     case'smart':return s.smart;
-    case'sentiment':return s.sentiment;
     case'readiness':return s.readiness;
     case'earn':return s.earn?s.earn.days:9999;
     case'insider':return s.insider?s.insider.net:0;
@@ -864,8 +817,8 @@ function rsiNote(rsi){
 }
 
 // ── AUDIT ITEM ────────────────────────────────────────
-var CAT_COLORS={exhaust:'#ff3d57',mom:'#00d4ff',val:'#ffd740',analyst:'#00e676',smart:'#a78bfa',context:'#7a94aa',uw:'#7c4dff',sent:'#ff9100'};
-var CAT_LABELS={exhaust:'EXHAUSTION',mom:'MOMENTUM',val:'VALUATION',analyst:'ANALYST',smart:'SMART $',context:'CONTEXT',uw:'UW PENDING',sent:'SENTIMENT'};
+var CAT_COLORS={exhaust:'#ff3d57',mom:'#00d4ff',val:'#ffd740',analyst:'#00e676',smart:'#a78bfa',context:'#7a94aa',uw:'#7c4dff'};
+var CAT_LABELS={exhaust:'EXHAUSTION',mom:'MOMENTUM',val:'VALUATION',analyst:'ANALYST',smart:'SMART $',context:'CONTEXT',uw:'UW PENDING'};
 function aitem(lbl,val,form,cat){
   cat=cat||'context';
   var c=CAT_COLORS[cat]||'#7a94aa';
@@ -930,13 +883,6 @@ function renderSection(ticker){
     insHtml=`<span class="${icls}">${s.insider.label}</span>`;
   }
 
-  // Sentiment cell — contrarian
-  var sentHtml=`<span class="sent-neu" style="font-size:10px;">—</span>`;
-  if(s.sentBull||s.sentBear){
-    var scls=s.sentiment>=65?'sent-bull':s.sentiment<=35?'sent-bear':'sent-neu';
-    sentHtml=`<span class="${scls}" style="font-size:10px;">${s.sentLabel}</span>`;
-  }
-
   var html=`<div class="tsec" id="sec-${ticker}">`;
 
   // LEVEL 1
@@ -954,7 +900,6 @@ function renderSection(ticker){
   html+=scCell(s.val,false);
   html+=s.analystHasData?scCell(s.analyst,false):`<div class="cell"><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">— N/A</span></div>`;
   html+=scCell(s.smart,false);
-  html+=`<div class="cell">${sentHtml}</div>`;
   html+=scCell(s.readiness,false);
   html+=`<div class="cell"><span class="sig ${sigClass(s.sig)}">${sigDot(s.sig)} ${s.sig}</span></div>`;
   html+=`</div>`;
@@ -1006,13 +951,6 @@ function renderSection(ticker){
       <div class="sub-hdr" style="color:#a78bfa;">↑ SMART $ (volume proxy)</div>
       ${sbRow('Block',s.block)}${sbRow('VolRatio',Math.round(s.volRat*50))}${sbRow('Accum',s.accum)}
     </div></div>`;
-    // Sentiment sub
-    html+=`<div class="cell" style="padding:7px 10px;"><div>
-      <div class="sub-hdr" style="color:#ff9100;">↑ SENTIMENT (contrarian)</div>
-      <div class="sbar-row"><span class="sbar-lbl">Bull%</span><span style="font-family:var(--mono);font-size:10px;color:var(--yellow);">${s.sentBull}%</span></div>
-      <div class="sbar-row"><span class="sbar-lbl">Bear%</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.sentBear}%</span></div>
-      <div class="sbar-row"><span class="sbar-lbl">Signal</span><span style="font-family:var(--mono);font-size:10px;">${s.sentLabel}</span></div>
-    </div></div>`;
     html+=`<div class="cell" style="font-size:10px;color:var(--text3);">—</div>`;
     html+=`<div class="cell"><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">UW Flow<br><span class="ub" style="margin-top:3px;">Pending</span></span></div>`;
     html+=`</div>`;
@@ -1023,7 +961,7 @@ function renderSection(ticker){
       html+=`<div class="row3">
         <div class="audit-hdr">🔬 Raw Audit — ${ticker}
           <span style="font-size:9px;color:var(--text3);font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;margin-left:10px;">
-            🔴=High bad (exhaust/decay) &nbsp;🟢=High good (momentum/smart$) &nbsp;🟡=Valuation &nbsp;🟣=Smart$ proxy &nbsp;🟠=Sentiment
+            🔴=High bad (exhaust/decay) &nbsp;🟢=High good (momentum/smart$) &nbsp;🟡=Valuation &nbsp;🟣=Smart$ proxy
           </span>
         </div>
         <div class="audit-grid">
@@ -1062,9 +1000,6 @@ function renderSection(ticker){
           ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','FMP /earning_calendar → next date. ⚠ within 14d=caution','context')}
           ${aitem('Days to Earn',s.earn?s.earn.days+'d':'N/A','Days until next earnings report','context')}
           ${aitem('Insider Net 90d',(s.raw.insiderNet||0).toLocaleString(),'FMP /insider-trading. Purchases−Sales last 90 days.','context')}
-          ${aitem('ST Bull%',s.sentBull+'%','StockTwits % bullish messages — HIGH=crowd bullish=CONTRARIAN CAUTION','sent')}
-          ${aitem('ST Bear%',s.sentBear+'%','StockTwits % bearish messages — HIGH=crowd bearish=CONTRARIAN OPPORTUNITY','sent')}
-          ${aitem('ST Contra Score',s.sentiment,'Contrarian score: 50=neutral, high=crowd bearish (buy signal), low=crowd bullish (trim signal)','sent')}
           ${aitem('⚡ UW: Net Prem 3D','Pending','Σ(CallPrem−PutPrem) over 3 days','uw')}
           ${aitem('⚡ UW: Sweep Bias','Pending','CallSweepPrem÷TotalSweepPrem. >0.6=bullish urgency','uw')}
           ${aitem('⚡ UW: OI Bias','Pending','CallOI_Δ−PutOI_Δ (30–90 DTE)','uw')}
@@ -1087,7 +1022,6 @@ var GL=[
     {n:'Finnhub',t:'Free API',s:'context',d:'Live quotes, company profile, PE ratio, EV/EBITDA, 52W high/low, beta. The backbone of all price and fundamental data.',f:'3 calls per ticker per refresh. Free tier at finnhub.io'},
     {n:'Twelve Data',t:'Free API',s:'context',d:'Real 90-day OHLCV candle history for all US stocks/ETFs. No CORS issues, proper REST API. Powers all momentum calculations when connected.',f:'2 calls per ticker. Free tier at twelvedata.com (800 calls/day)'},
     {n:'FMP (Financial Modeling Prep)',t:'Free API',s:'context',d:'Analyst ratings, price targets, earnings calendar, insider transactions. Cached for 6 hours so 250 free calls/day stretch across multiple refreshes.',f:'financialmodelingprep.com — free tier, no credit card'},
-    {n:'StockTwits',t:'No Key Needed',s:'context',d:'Retail sentiment from StockTwits messages. Used as a CONTRARIAN indicator — when retail is overwhelmingly bullish, that is often a top signal. No API key required.',f:'Public endpoint — auto-loads for all tickers'},
   ]},
   {sec:'Composite Scores',items:[
     {n:'Setup Score',t:'Composite',s:'context',d:'Blended score summarizing overall trade setup quality. Used internally to determine Signal.',f:'Momentum×30% + Valuation×20% + Smart$×20% + Readiness×15% + Analyst×15%'},
@@ -1118,11 +1052,7 @@ var GL=[
   {sec:'Insider Activity',items:[
     {n:'INSIDER',t:'FMP Data',s:'context',d:'Net shares bought minus sold by executives/directors over last 90 days. Insider BUYING is a high-quality bullish signal. Selling is less meaningful (could be tax/diversification) but notable in size.',f:'FMP /insider-trading → sum Purchases − Sales last 90 days'},
   ]},
-  {sec:'Sentiment (StockTwits — Contrarian)',items:[
-    {n:'SENTIMENT Score',t:'Contrarian',s:'context',d:'USED AS CONTRARIAN INDICATOR. High score = crowd is bearish = potential opportunity. Low score = crowd overwhelmingly bullish = caution/potential top. Never follow the crowd.',f:'50 − (bullPct − bearPct) × 50. High=contrarian bullish, Low=contrarian bearish'},
-    {n:'Contra-Bull Signal',t:'Contrarian',s:'context',d:'Shows when StockTwits users are predominantly BEARISH — crowd fear often precedes bounces. A contrarian buying signal.',f:'Sentiment score ≥ 65 (majority of messages bearish)'},
-    {n:'Contra-Bear Signal',t:'Contrarian',s:'context',d:'Shows when StockTwits users are predominantly BULLISH — retail euphoria often precedes pullbacks. A contrarian trim signal.',f:'Sentiment score ≤ 35 (majority of messages bullish)'},
-  ]},
+
   {sec:'Smart Money (Volume Proxy → Upgraded by UW)',items:[
     {n:'Smart Money Score',t:'Volume Proxy',s:'context',d:'Currently modeled from volume patterns. Will be upgraded by Unusual Whales real dark pool and block trade data when connected.',f:'Block Proxy×40% + Volume Ratio×35% + Accumulation×25%'},
     {n:'Block Trade Proxy',t:'Volume Proxy',s:'context',d:'On up-days, was volume heavy? On down-days, was it light? Asymmetric volume = institutional accumulation pattern.',f:'UpVol/(UpVol+DnVol)×100 over 20 days'},
@@ -1133,7 +1063,7 @@ var GL=[
     {n:'CHG%',t:'Price Action',s:'context',d:'Today\'s price change vs yesterday\'s close. Same-day metric only — not weekly or longer.',f:'(Current Price − Previous Close) / Previous Close × 100'},
   ]},
   {sec:'Signal Logic',items:[
-    {n:'BUY 🟢',t:'Signal',s:'context',d:'Score ≥ +5. Strong alignment across momentum, valuation, smart money, analyst, and sentiment signals.',f:'Composite score ≥ 5'},
+    {n:'BUY 🟢',t:'Signal',s:'context',d:'Score ≥ +5. Strong alignment across momentum, valuation, smart money, analyst.',f:'Composite score ≥ 5'},
     {n:'ACCUMULATE 🔵',t:'Signal',s:'context',d:'Score +2 to +4. Setup improving but not all signals aligned. Good for scaling in gradually.',f:'Composite score +2 to +4'},
     {n:'NEUTRAL ⚪',t:'Signal',s:'context',d:'Score −1 to +1. No clear edge. Wait for confirmation.',f:'Composite score −1 to +1'},
     {n:'TRIM 🟠',t:'Signal',s:'context',d:'Score −2 to −4. Deteriorating momentum or high exhaustion. Consider reducing position.',f:'Composite score −2 to −4'},
@@ -1170,7 +1100,7 @@ function buildGlossary(){
     @media(max-width:700px){.gitems{grid-template-columns:1fr;}}
   </style></head><body>`;
   html+='<h1>📖 Watchlist Intelligence — Metric Glossary</h1>';
-  html+='<div class="sub">v6.0 · Data sources: Finnhub + Twelve Data + FMP + StockTwits + Unusual Whales (pending)</div>';
+  html+='<div class="sub">v6.3 · Data sources: Finnhub + Twelve Data + FMP + Unusual Whales (pending)</div>';
   html+=GL.map(section=>
     `<div class="gsec"><div class="gsec-t">${section.sec}</div><div class="gitems">`+
     section.items.map(it=>
