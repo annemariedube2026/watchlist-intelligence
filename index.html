@@ -189,7 +189,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.0 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.1 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -199,6 +199,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="api-pill"><div class="dot" id="stDot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div><span>StockTwits</span></div>
     <div class="api-pill"><div class="dot" id="uwDot"></div><span>UW: Pending</span></div>
     <button class="btn-gl" onclick="openGL()">📖 Glossary</button>
+    <button class="btn-gl" onclick="openSettings()" title="Add or update API keys">⚙️ Settings</button>
   </div>
 </header>
 
@@ -1178,6 +1179,19 @@ function buildGlossary(){
   ).join('');
   html+='</body></html>';
   return html;
+}
+
+function openSettings(){
+  var b = document.getElementById('banner');
+  b.style.display = 'block';
+  b.scrollIntoView({behavior:'smooth'});
+  // Re-populate fields with saved keys
+  var fk=localStorage.getItem('wi_fh')||'';
+  var tk=localStorage.getItem('wi_td')||'';
+  var mk=localStorage.getItem('wi_fmp')||'';
+  if(fk) document.getElementById('fhKey').value=fk;
+  if(tk) document.getElementById('tdKey').value=tk;
+  if(mk) document.getElementById('fmpKey').value=mk;
 }
 
 function openGL(){
