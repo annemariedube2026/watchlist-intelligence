@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.3 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.4 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -468,12 +468,16 @@ async function loadTicker(ticker) {
   }
 }
 
-// ── RETRY WRAPPER ─────────────────────────────────────
+// ── RETRY WRAPPER — up to 3 attempts with backoff ─────
 async function loadTickerWithRetry(ticker, attempt) {
   attempt=attempt||1;
   await loadTicker(ticker);
-  if(DATA[ticker]&&DATA[ticker].err&&DATA[ticker].err.indexOf('429')>=0&&attempt<2) {
-    await new Promise(r=>setTimeout(r,2500));
+  var err=DATA[ticker]&&DATA[ticker].err;
+  if(err && (err.indexOf('429')>=0||err.indexOf('Rate')>=0) && attempt<3) {
+    var wait=attempt===1?3000:6000; // 3s then 6s backoff
+    if(document.getElementById('progTxt'))
+      document.getElementById('progTxt').textContent=ticker+' rate limited, retrying in '+(wait/1000)+'s…';
+    await new Promise(r=>setTimeout(r,wait));
     await loadTickerWithRetry(ticker, attempt+1);
   }
 }
@@ -561,21 +565,39 @@ function renderChips(){
 // ── REFRESH ───────────────────────────────────────────
 async function refreshAll() {
   if(!FH_KEY){alert('Please connect your Finnhub API key first.');return;}
-  var btn=document.getElementById('refBtn'); btn.classList.add('spinning');
+  var btn=document.getElementById('refBtn');
+  if(btn.dataset.loading==='1') return; // prevent double-click
+  btn.dataset.loading='1';
+  btn.classList.add('spinning');
   var prog=document.getElementById('progTxt');
-  document.getElementById('tbody').innerHTML=WATCHLIST.map(t=>
-    `<div class="lrow"><div class="spinner"></div>Loading ${t}…</div>`).join('');
 
-  var BATCH=4;
-  for(var i=0;i<WATCHLIST.length;i+=BATCH) {
-    var batch=WATCHLIST.slice(i,i+BATCH);
-    if(prog) prog.textContent='Loading '+Math.min(i+BATCH,WATCHLIST.length)+'/'+WATCHLIST.length+'…';
+  // Only clear tickers that don't have good data yet (or all if full refresh)
+  var toLoad = WATCHLIST.filter(t=>!DATA[t]||DATA[t].err);
+  var isFullRefresh = toLoad.length===0;
+  if(isFullRefresh) toLoad=[...WATCHLIST]; // full re-fetch if everything already loaded
+
+  // Show loading rows only for tickers being fetched
+  toLoad.forEach(t=>{
+    DATA[t]={err:null,_loading:true};
+  });
+  renderTable();
+
+  // Batch of 3, 2.5s gap — stays well under Finnhub 60 calls/min free limit
+  // 3 tickers × 3 FH calls = 9 calls per batch, 2.5s apart = ~216 calls/min max but
+  // realistically ~22 calls/30s which is safe
+  var BATCH=3;
+  var loaded=0;
+  for(var i=0;i<toLoad.length;i+=BATCH) {
+    var batch=toLoad.slice(i,i+BATCH);
+    loaded+=batch.length;
+    if(prog) prog.textContent=loaded+'/'+toLoad.length+' loaded…';
     await Promise.all(batch.map(t=>loadTickerWithRetry(t)));
     renderTable();
-    if(i+BATCH<WATCHLIST.length) await new Promise(r=>setTimeout(r,1800));
+    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,2500));
   }
 
   btn.classList.remove('spinning');
+  btn.dataset.loading='0';
   if(prog) prog.textContent='';
   document.getElementById('lupd').textContent='Updated: '+new Date().toLocaleTimeString();
   renderTable();
@@ -850,9 +872,9 @@ function renderTable(){
 
 function renderSection(ticker){
   var d=DATA[ticker];
-  if(!d)return`<div class="lrow"><div class="spinner"></div>Loading ${ticker}…</div>`;
+  if(!d||d._loading)return`<div class="lrow"><div class="spinner"></div>Loading ${ticker}…</div>`;
   if(d.err){
-    var errType=d.err.indexOf('429')>=0?'⏱ Rate limited — hit Refresh All':
+    var errType=d.err.indexOf('429')>=0?'⏱ Rate limited — wait 30s then hit Refresh All':
                 d.err.indexOf('403')>=0?'🔒 Requires API upgrade':
                 d.err.indexOf('404')>=0?'❓ Ticker not found in Finnhub':
                 '⚠ '+d.err;
