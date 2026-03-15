@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.5 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.6 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -279,7 +279,7 @@ var FH_KEY='', TD_KEY='', FMP_KEY='', UW_KEY='';
 var WATCHLIST=[], DATA={}, EXPAND={};
 var SORT_COL='', SORT_DIR=1;
 var FMP_CACHE={}, FMP_CACHE_TS={};
-var FMP_CACHE_TTL = 6*60*60*1000; // 6 hours
+var FMP_CACHE_TTL = 24*60*60*1000; // 24 hours — analyst/insider data changes slowly
 
 // ── API HELPERS ────────────────────────────────────────
 async function fhGet(path) {
@@ -381,44 +381,79 @@ async function getCandles(ticker, quote, metrics) {
   return buildFallback(quote, metrics);
 }
 
-// ── FMP: fundamentals with 6hr cache ──────────────────
+// ── FMP: fundamentals with 24hr cache ─────────────────
+// Strategy: 3 calls per ticker (dropped separate ptRaw — use analyst-estimates instead)
+// Sequential with 300ms gaps to stay under rate limit
+// Cache for 24hrs — analyst/earnings/insider don't change hourly
 async function fmpFundamentals(ticker) {
   if(!FMP_KEY) return {recTrend:[], priceTarget:{}, calendar:{earningsCalendar:[]}, insider:{data:[]}};
 
   var cacheKey = 'fmp_'+ticker;
   var now = Date.now();
+  var TTL_24H = 24*60*60*1000;
 
-  // Check localStorage cache first
+  // Check localStorage cache first — 24hr TTL
   try {
     var cached = localStorage.getItem(cacheKey);
     var cachedTs = parseInt(localStorage.getItem(cacheKey+'_ts')||'0');
-    if(cached && now - cachedTs < FMP_CACHE_TTL) {
+    if(cached && now - cachedTs < TTL_24H) {
       return JSON.parse(cached);
     }
   } catch(e) {}
 
-  // Fetch fresh data — run in parallel
-  // FMP free tier: 250 calls/day, ~5 calls/minute — stagger slightly
-  var ratings = await fmpGet('/analyst-stock-recommendations/'+ticker+'?limit=5').catch(()=>[]);
-  var earningsData = await fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]);
-  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=20').catch(()=>[]);
-  var ptData = []; // unused — price target fetched separately below
+  // Helper: delay between FMP calls to respect ~5 calls/min rate limit
+  var fmpDelay = ()=>new Promise(r=>setTimeout(r,350));
 
-  // Price target from FMP
+  // Call 1: Analyst recommendations
+  var ratings = await fmpGet('/analyst-stock-recommendations/'+ticker+'?limit=3').catch(()=>[]);
+  await fmpDelay();
+
+  // Call 2: Analyst estimates — includes price target consensus (replaces separate PT call)
+  var estimates = await fmpGet('/analyst-estimates/'+ticker+'?limit=1').catch(()=>[]);
+  await fmpDelay();
+
+  // Call 3: Earnings calendar
+  var earningsData = await fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]);
+  await fmpDelay();
+
+  // Call 4: Insider trading — only fetch if we have budget (check cache age)
+  // Skip insider on first load if already rate-limited — it'll populate on next refresh
+  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
+
+  // Price target from analyst estimates (no separate call needed)
   var ptResult = {};
   try {
-    var ptRaw = await fmpGet('/price-target?symbol='+ticker+'&limit=5');
-    if(ptRaw && ptRaw.length) {
-      var targets = ptRaw.map(p=>p.priceTarget).filter(Boolean);
-      if(targets.length) {
+    if(estimates && estimates.length) {
+      var est = estimates[0];
+      var targets = [est.estimatedEpsAvg, est.estimatedRevenueLow, est.estimatedRevenueHigh]
+        .filter(Boolean);
+      // FMP analyst-estimates has estimatedPriceTarget fields
+      if(est.estimatedPriceHigh||est.estimatedPriceLow||est.estimatedPriceAvg) {
         ptResult = {
-          targetMean: targets.reduce((a,b)=>a+b,0)/targets.length,
-          targetHigh: Math.max(...targets),
-          targetLow:  Math.min(...targets)
+          targetMean: est.estimatedPriceAvg||0,
+          targetHigh: est.estimatedPriceHigh||0,
+          targetLow:  est.estimatedPriceLow||0
         };
       }
     }
   } catch(e) {}
+
+  // Also try price-target endpoint as backup if estimates gave nothing
+  if(!ptResult.targetMean) {
+    try {
+      var ptRaw = await fmpGet('/price-target?symbol='+ticker+'&limit=3');
+      if(ptRaw && ptRaw.length) {
+        var tgts = ptRaw.map(p=>p.priceTarget).filter(Boolean);
+        if(tgts.length) {
+          ptResult = {
+            targetMean: tgts.reduce((a,b)=>a+b,0)/tgts.length,
+            targetHigh: Math.max(...tgts),
+            targetLow:  Math.min(...tgts)
+          };
+        }
+      }
+    } catch(e) {}
+  }
 
   // Normalize FMP recommendation format to match our existing calcAnalyst shape
   var recTrend = [];
@@ -484,16 +519,18 @@ function buildFallback(quote, metrics) {
 // ── LOAD ONE TICKER ───────────────────────────────────
 async function loadTicker(ticker) {
   try {
-    // Load Finnhub + FMP in parallel, then cascade candles separately
-    var [quote, profile, metrics, fmpData] = await Promise.all([
+    // Step 1: Finnhub calls in parallel (fast, 3 calls)
+    var [quote, profile, metrics] = await Promise.all([
       fhGet('/quote?symbol='+ticker),
       fhGet('/stock/profile2?symbol='+ticker),
       fhGet('/stock/metric?symbol='+ticker+'&metric=all'),
-      fmpFundamentals(ticker).catch(()=>({recTrend:[],priceTarget:{},calendar:{earningsCalendar:[]},insider:{data:[]}}))
     ]);
 
-    // Candle cascade: TD → Yahoo → synthetic (sequential so we can fall through)
-    var candles = await getCandles(ticker, quote, metrics);
+    // Step 2: Candles + FMP in parallel (candles fast, FMP has own internal delays)
+    var [candles, fmpData] = await Promise.all([
+      getCandles(ticker, quote, metrics),
+      fmpFundamentals(ticker).catch(()=>({recTrend:[],priceTarget:{},calendar:{earningsCalendar:[]},insider:{data:[]}}))
+    ]);
 
     // Update header status dots based on candle source
     if(candles.s==='twelvedata') {
@@ -581,7 +618,14 @@ async function connectAPIs() {
     if(!test||test.c===undefined) throw new Error('Unexpected Finnhub response');
     localStorage.setItem('wi_fh',fk);
     if(tk) localStorage.setItem('wi_td',tk);
-    if(mk) localStorage.setItem('wi_fmp',mk);
+    if(mk) {
+      // Clear FMP cache when key changes so fresh data loads
+      var oldKey = localStorage.getItem('wi_fmp');
+      if(oldKey !== mk) {
+        Object.keys(localStorage).filter(k=>k.startsWith('fmp_')).forEach(k=>localStorage.removeItem(k));
+      }
+      localStorage.setItem('wi_fmp',mk);
+    }
     if(uk) localStorage.setItem('wi_uw',uk);
     setDot('fh','on','Finnhub: Live');
     if(tk) setDot('td','on','TwelveData: Live');
@@ -642,7 +686,10 @@ async function refreshAll() {
   // Batch of 3, 2.5s gap — stays well under Finnhub 60 calls/min free limit
   // 3 tickers × 3 FH calls = 9 calls per batch, 2.5s apart = ~216 calls/min max but
   // realistically ~22 calls/30s which is safe
-  var BATCH=3;
+  // Batch of 2 with 3s gap — FMP has internal 350ms delays per call (4 calls = ~1.4s)
+  // so 2 tickers in parallel = ~1.4s of FMP calls, then 3s gap = well under 5/min limit
+  // Finnhub: 2 tickers × 3 calls = 6 calls per batch, well under 60/min
+  var BATCH=2;
   var loaded=0;
   for(var i=0;i<toLoad.length;i+=BATCH) {
     var batch=toLoad.slice(i,i+BATCH);
@@ -650,7 +697,7 @@ async function refreshAll() {
     if(prog) prog.textContent=loaded+'/'+toLoad.length+' loaded…';
     await Promise.all(batch.map(t=>loadTickerWithRetry(t)));
     renderTable();
-    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,2500));
+    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,3000));
   }
 
   btn.classList.remove('spinning');
