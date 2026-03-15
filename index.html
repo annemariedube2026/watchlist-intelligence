@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.4 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.5 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -231,8 +231,8 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 </div>
 
 <div class="legend">
-  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);margin-right:3px;vertical-align:middle;"></span>Green dot = Real price data (scores reliable)</span>
-  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 4px var(--red);margin-right:3px;vertical-align:middle;"></span>Red dot = Estimated data (momentum scores less reliable)</span>
+  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);margin-right:3px;vertical-align:middle;"></span>Green dot = Real candle data — TwelveData or Yahoo (scores reliable)</span>
+  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 4px var(--red);margin-right:3px;vertical-align:middle;"></span>Red dot = Synthetic estimated data (momentum scores less reliable)</span>
   <span style="color:var(--yellow);">⚠ Earnings within 14 days</span>
   <span style="color:var(--red);">⚠ Earnings within 7 days</span>
 </div>
@@ -313,14 +313,72 @@ async function fmpGet(path) {
 // ── TWELVE DATA: candles + pre-built indicators ────────
 async function tdCandles(ticker) {
   if(!TD_KEY) throw new Error('No Twelve Data key');
-  // Get 90 days of daily candles
   var data = await tdGet('/time_series?symbol='+ticker+'&interval=1day&outputsize=90&format=JSON');
   if(!data.values||!data.values.length) throw new Error('TD: no candle data');
-  // TD returns newest first — reverse to oldest-first for our calculations
   var vals = data.values.slice().reverse();
   var closes = vals.map(v=>parseFloat(v.close));
   var vols   = vals.map(v=>parseFloat(v.volume)||0);
   return {c:closes, v:vols, s:'twelvedata'};
+}
+
+// ── YAHOO FINANCE candle fallback (90d via CORS proxy) ─
+async function yahooCandles(ticker) {
+  var end = Math.floor(Date.now()/1000);
+  var start = end - 90*24*60*60;
+  var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker
+    +'?interval=1d&period1='+start+'&period2='+end+'&range=3mo';
+
+  // Try allorigins proxy first, corsproxy.io as backup
+  var proxies = [
+    'https://api.allorigins.win/get?url='+encodeURIComponent(url),
+    'https://corsproxy.io/?'+encodeURIComponent(url)
+  ];
+
+  for(var i=0;i<proxies.length;i++) {
+    try {
+      var r = await fetch(proxies[i], {signal: AbortSignal.timeout(8000)});
+      if(!r.ok) continue;
+      var wrapper = await r.json();
+      // allorigins wraps in .contents, corsproxy returns direct
+      var raw = wrapper.contents ? JSON.parse(wrapper.contents) : wrapper;
+      var result = raw.chart&&raw.chart.result&&raw.chart.result[0];
+      if(!result) continue;
+      var closes = result.indicators.quote[0].close;
+      var vols   = result.indicators.quote[0].volume;
+      if(!closes||closes.length<20) continue;
+      // Filter out null values
+      var c=[], v=[];
+      closes.forEach((cl,idx)=>{
+        if(cl!=null){ c.push(cl); v.push(vols[idx]||0); }
+      });
+      if(c.length<20) continue;
+      return {c, v, s:'yahoo'};
+    } catch(e) { continue; }
+  }
+  throw new Error('Yahoo: all proxies failed');
+}
+
+// ── CANDLE CASCADE: TD → Yahoo → Finnhub synthetic ────
+async function getCandles(ticker, quote, metrics) {
+  // 1. Try Twelve Data
+  if(TD_KEY) {
+    try {
+      var td = await tdCandles(ticker);
+      return td;
+    } catch(e) {
+      console.warn(ticker+' TD failed ('+e.message+'), trying Yahoo…');
+    }
+  }
+  // 2. Try Yahoo Finance proxy
+  try {
+    var yh = await yahooCandles(ticker);
+    console.log(ticker+' Yahoo candles OK ('+yh.c.length+'d)');
+    return yh;
+  } catch(e) {
+    console.warn(ticker+' Yahoo failed ('+e.message+'), using synthetic…');
+  }
+  // 3. Finnhub synthetic fallback
+  return buildFallback(quote, metrics);
 }
 
 // ── FMP: fundamentals with 6hr cache ──────────────────
@@ -426,27 +484,26 @@ function buildFallback(quote, metrics) {
 // ── LOAD ONE TICKER ───────────────────────────────────
 async function loadTicker(ticker) {
   try {
-    // Parallel: Finnhub + candle + FMP
-    var candlePromise = TD_KEY
-      ? tdCandles(ticker).catch(e => { console.warn(ticker+' TD fallback:',e.message); return null; })
-      : Promise.resolve(null);
-
-    var [quote, profile, metrics, candleResult, fmpData] = await Promise.all([
+    // Load Finnhub + FMP in parallel, then cascade candles separately
+    var [quote, profile, metrics, fmpData] = await Promise.all([
       fhGet('/quote?symbol='+ticker),
       fhGet('/stock/profile2?symbol='+ticker),
       fhGet('/stock/metric?symbol='+ticker+'&metric=all'),
-      candlePromise,
       fmpFundamentals(ticker).catch(()=>({recTrend:[],priceTarget:{},calendar:{earningsCalendar:[]},insider:{data:[]}}))
     ]);
 
-    // Resolve candles: TwelveData → fallback
-    var candles = candleResult || buildFallback(quote, metrics);
+    // Candle cascade: TD → Yahoo → synthetic (sequential so we can fall through)
+    var candles = await getCandles(ticker, quote, metrics);
 
-    // Update header status dots
-    if(candleResult && candleResult.s==='twelvedata') {
+    // Update header status dots based on candle source
+    if(candles.s==='twelvedata') {
       var td=document.getElementById('tdDot'),tt=document.getElementById('tdTxt');
       if(td){td.className='dot on';}
       if(tt) tt.textContent='TwelveData: Live';
+    } else if(candles.s==='yahoo') {
+      var td=document.getElementById('tdDot'),tt=document.getElementById('tdTxt');
+      if(td){td.className='dot on';}
+      if(tt) tt.textContent='TD/Yahoo: Live';
     }
     if(fmpData.recTrend && fmpData.recTrend.length) {
       var fd=document.getElementById('fmpDot'),ft=document.getElementById('fmpTxt');
@@ -886,9 +943,12 @@ function renderSection(ticker){
   var chgSign=s.chg>=0?'+':'', chgCls=s.chg>=0?'pos':'neg';
   var name=(prof.name||'').substring(0,20);
   var candleSrc=d.candles?(d.candles.s||'fallback'):'fallback';
-  var srcDot=candleSrc==='fallback'
-    ?`<span title="Fallback estimated data — momentum scores less reliable" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 4px var(--red);margin-left:4px;vertical-align:middle;"></span>`
-    :`<span title="${candleSrc}: real price data — scores reliable" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);margin-left:4px;vertical-align:middle;"></span>`;
+  var srcDotColor = candleSrc==='fallback' ? 'var(--red)' : 'var(--green)';
+  var srcDotTitle = candleSrc==='fallback'
+    ? 'Synthetic estimated data — momentum scores less reliable'
+    : candleSrc==='yahoo' ? 'Yahoo Finance: real price data — scores reliable'
+    : 'TwelveData: real price data — scores reliable';
+  var srcDot=`<span title="${srcDotTitle}" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${srcDotColor};box-shadow:0 0 4px ${srcDotColor};margin-left:4px;vertical-align:middle;"></span>`;
 
   // Earnings cell
   var earnHtml='<span class="earn-ok">—</span>';
