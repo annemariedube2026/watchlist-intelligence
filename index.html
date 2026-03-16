@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.6 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.8 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -240,6 +240,9 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 <div class="rbar">
   <button class="btn-ref" id="refBtn" onclick="refreshAll()">
     <span class="spin-icon" id="spinIcon">↻</span> Refresh All
+  </button>
+  <button class="btn-ref" onclick="clearAllCaches()" title="Force fresh data fetch — clears candle and FMP caches">
+    🗑 Clear Caches
   </button>
   <span class="lupd" id="lupd"></span>
   <span id="progTxt" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
@@ -322,62 +325,123 @@ async function tdCandles(ticker) {
 }
 
 // ── YAHOO FINANCE candle fallback (90d via CORS proxy) ─
-async function yahooCandles(ticker) {
-  var end = Math.floor(Date.now()/1000);
-  var start = end - 90*24*60*60;
-  var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker
-    +'?interval=1d&period1='+start+'&period2='+end+'&range=3mo';
-
-  // Try allorigins proxy first, corsproxy.io as backup
-  var proxies = [
-    'https://api.allorigins.win/get?url='+encodeURIComponent(url),
-    'https://corsproxy.io/?'+encodeURIComponent(url)
-  ];
-
-  for(var i=0;i<proxies.length;i++) {
-    try {
-      var r = await fetch(proxies[i], {signal: AbortSignal.timeout(8000)});
-      if(!r.ok) continue;
-      var wrapper = await r.json();
-      // allorigins wraps in .contents, corsproxy returns direct
-      var raw = wrapper.contents ? JSON.parse(wrapper.contents) : wrapper;
-      var result = raw.chart&&raw.chart.result&&raw.chart.result[0];
-      if(!result) continue;
-      var closes = result.indicators.quote[0].close;
-      var vols   = result.indicators.quote[0].volume;
-      if(!closes||closes.length<20) continue;
-      // Filter out null values
-      var c=[], v=[];
-      closes.forEach((cl,idx)=>{
-        if(cl!=null){ c.push(cl); v.push(vols[idx]||0); }
-      });
-      if(c.length<20) continue;
-      return {c, v, s:'yahoo'};
-    } catch(e) { continue; }
-  }
-  throw new Error('Yahoo: all proxies failed');
+// ── TIMEOUT HELPER (AbortSignal.timeout not in all browsers) ──
+function fetchWithTimeout(url, ms) {
+  var controller = new AbortController();
+  var timer = setTimeout(()=>controller.abort(), ms);
+  return fetch(url, {signal:controller.signal}).finally(()=>clearTimeout(timer));
 }
 
-// ── CANDLE CASCADE: TD → Yahoo → Finnhub synthetic ────
+// ── PARSE YAHOO CHART RESPONSE ────────────────────────
+function parseYahooChart(data) {
+  try {
+    var result = data.chart&&data.chart.result&&data.chart.result[0];
+    if(!result) return null;
+    var q = result.indicators&&result.indicators.quote&&result.indicators.quote[0];
+    if(!q) return null;
+    var closes = q.close, vols = q.volume||[];
+    if(!closes||!closes.length) return null;
+    var c=[], v=[];
+    closes.forEach((cl,idx)=>{ if(cl!=null){ c.push(cl); v.push(vols[idx]||0); } });
+    if(c.length<20) return null;
+    return {c, v, s:'yahoo'};
+  } catch(e) { return null; }
+}
+
+async function yahooCandles(ticker) {
+  var end = Math.floor(Date.now()/1000);
+  var start = end - 95*24*60*60; // 95 days to ensure 90 trading days
+  var yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker
+    +'?interval=1d&period1='+start+'&period2='+end;
+
+  // Also try query2 as Yahoo sometimes routes differently
+  var yahooUrl2 = 'https://query2.finance.yahoo.com/v8/finance/chart/'+ticker
+    +'?interval=1d&period1='+start+'&period2='+end;
+
+  // Four proxy strategies — different wrapping behavior noted per proxy
+  var attempts = [
+    // allorigins wraps response in {contents: "...json string..."}
+    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl), wrap:'allorigins'},
+    // corsproxy.io returns the response directly
+    {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl), wrap:'direct'},
+    // thingproxy is reliable backup
+    {url:'https://thingproxy.freeboard.io/fetch/'+yahooUrl, wrap:'direct'},
+    // allorigins with query2 as final try
+    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl2), wrap:'allorigins'},
+  ];
+
+  for(var i=0;i<attempts.length;i++) {
+    try {
+      var r = await fetchWithTimeout(attempts[i].url, 9000);
+      if(!r.ok) { console.warn('Yahoo proxy '+i+' HTTP '+r.status); continue; }
+      var wrapper = await r.json();
+      var data;
+      if(attempts[i].wrap==='allorigins') {
+        if(!wrapper.contents) continue;
+        try { data = JSON.parse(wrapper.contents); } catch(e) { continue; }
+      } else {
+        data = wrapper;
+      }
+      var parsed = parseYahooChart(data);
+      if(parsed) {
+        console.log(ticker+' Yahoo OK via proxy '+i+' ('+parsed.c.length+'d)');
+        return parsed;
+      }
+    } catch(e) {
+      console.warn(ticker+' Yahoo proxy '+i+' failed: '+e.message);
+      continue;
+    }
+  }
+  throw new Error('Yahoo: all proxies failed for '+ticker);
+}
+
+// ── CANDLE CACHE: store real candles for 8 hours ────────
+var CANDLE_TTL = 8*60*60*1000;
+function saveCandleCache(ticker, candles) {
+  try {
+    localStorage.setItem('cd_'+ticker, JSON.stringify({data:candles, ts:Date.now()}));
+  } catch(e) {}
+}
+function loadCandleCache(ticker) {
+  try {
+    var raw = localStorage.getItem('cd_'+ticker);
+    if(!raw) return null;
+    var obj = JSON.parse(raw);
+    if(Date.now()-obj.ts > CANDLE_TTL) return null;
+    // Only return cached if it was real data (not synthetic)
+    if(obj.data && obj.data.s !== 'fallback') return obj.data;
+  } catch(e) {}
+  return null;
+}
+
+// ── CANDLE CASCADE: Cache → TD → Yahoo (4 proxies) → Finnhub synthetic ──
 async function getCandles(ticker, quote, metrics) {
-  // 1. Try Twelve Data
+  // 0. Check cache first — if we have real data < 8hrs old, use it
+  var cached = loadCandleCache(ticker);
+  if(cached) {
+    console.log(ticker+' candles from cache ('+cached.s+')');
+    return cached;
+  }
+
+  // 1. Try Twelve Data first (best quality, pre-cleaned)
   if(TD_KEY) {
     try {
       var td = await tdCandles(ticker);
+      saveCandleCache(ticker, td);
       return td;
     } catch(e) {
-      console.warn(ticker+' TD failed ('+e.message+'), trying Yahoo…');
+      console.warn(ticker+' TD failed: '+e.message+' → trying Yahoo…');
     }
   }
-  // 2. Try Yahoo Finance proxy
+  // 2. Try Yahoo Finance through 4 different CORS proxies
   try {
     var yh = await yahooCandles(ticker);
-    console.log(ticker+' Yahoo candles OK ('+yh.c.length+'d)');
+    saveCandleCache(ticker, yh);
     return yh;
   } catch(e) {
-    console.warn(ticker+' Yahoo failed ('+e.message+'), using synthetic…');
+    console.warn(ticker+' all Yahoo proxies failed → using Finnhub synthetic');
   }
-  // 3. Finnhub synthetic fallback
+  // 3. Last resort: Finnhub synthetic (red dot) — NOT cached
   return buildFallback(quote, metrics);
 }
 
@@ -404,69 +468,72 @@ async function fmpFundamentals(ticker) {
   // Helper: delay between FMP calls to respect ~5 calls/min rate limit
   var fmpDelay = ()=>new Promise(r=>setTimeout(r,350));
 
-  // Call 1: Analyst recommendations
-  var ratings = await fmpGet('/analyst-stock-recommendations/'+ticker+'?limit=3').catch(()=>[]);
+  // Call 1: Grades summary — current endpoint (replaces legacy analyst-stock-recommendations)
+  // Returns consolidated strongBuy/buy/hold/sell/strongSell counts
+  var gradesSummary = await fmpGet('/grades-summary/'+ticker).catch(()=>null);
   await fmpDelay();
 
-  // Call 2: Analyst estimates — includes price target consensus (replaces separate PT call)
-  var estimates = await fmpGet('/analyst-estimates/'+ticker+'?limit=1').catch(()=>[]);
+  // Call 1b: Fallback to historical grades if summary empty
+  var grades = [];
+  if(!gradesSummary || (!gradesSummary.strongBuy && !gradesSummary.buy && !gradesSummary.hold)) {
+    grades = await fmpGet('/grade/'+ticker+'?limit=10').catch(()=>[]);
+    await fmpDelay();
+  }
+
+  // Call 2: Price target consensus — dedicated endpoint, more reliable than estimates
+  var ptConsensus = await fmpGet('/price-target-consensus?symbol='+ticker).catch(()=>null);
   await fmpDelay();
 
-  // Call 3: Earnings calendar
+  // Call 3: Earnings surprises — gives us next date + beat/miss history
   var earningsData = await fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]);
   await fmpDelay();
 
-  // Call 4: Insider trading — only fetch if we have budget (check cache age)
-  // Skip insider on first load if already rate-limited — it'll populate on next refresh
+  // Call 4: Insider trading
   var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
 
-  // Price target from analyst estimates (no separate call needed)
+  // Price target from consensus endpoint
   var ptResult = {};
   try {
-    if(estimates && estimates.length) {
-      var est = estimates[0];
-      var targets = [est.estimatedEpsAvg, est.estimatedRevenueLow, est.estimatedRevenueHigh]
-        .filter(Boolean);
-      // FMP analyst-estimates has estimatedPriceTarget fields
-      if(est.estimatedPriceHigh||est.estimatedPriceLow||est.estimatedPriceAvg) {
+    if(ptConsensus) {
+      // FMP /price-target-consensus returns {symbol, targetHigh, targetLow, targetMean, targetMedian}
+      var pt = Array.isArray(ptConsensus) ? ptConsensus[0] : ptConsensus;
+      if(pt && (pt.targetMean||pt.targetConsensus)) {
         ptResult = {
-          targetMean: est.estimatedPriceAvg||0,
-          targetHigh: est.estimatedPriceHigh||0,
-          targetLow:  est.estimatedPriceLow||0
+          targetMean: pt.targetMean||pt.targetConsensus||0,
+          targetHigh: pt.targetHigh||0,
+          targetLow:  pt.targetLow||0
         };
       }
     }
   } catch(e) {}
 
-  // Also try price-target endpoint as backup if estimates gave nothing
-  if(!ptResult.targetMean) {
-    try {
-      var ptRaw = await fmpGet('/price-target?symbol='+ticker+'&limit=3');
-      if(ptRaw && ptRaw.length) {
-        var tgts = ptRaw.map(p=>p.priceTarget).filter(Boolean);
-        if(tgts.length) {
-          ptResult = {
-            targetMean: tgts.reduce((a,b)=>a+b,0)/tgts.length,
-            targetHigh: Math.max(...tgts),
-            targetLow:  Math.min(...tgts)
-          };
-        }
-      }
-    } catch(e) {}
-  }
-
-  // Normalize FMP recommendation format to match our existing calcAnalyst shape
+  // Normalize analyst grades to recTrend format
   var recTrend = [];
-  if(ratings && ratings.length) {
-    var buys=0, holds=0, sells=0;
-    ratings.forEach(r=>{
-      var g=(r.analystRatingsStrongBuy||0)+(r.analystRatingsBuy||0);
-      var h=(r.analystRatingsHold||0);
-      var s=(r.analystRatingsSell||0)+(r.analystRatingsStrongSell||0);
-      buys+=g; holds+=h; sells+=s;
-    });
-    recTrend = [{strongBuy:buys, buy:0, hold:holds, sell:sells, strongSell:0}];
-  }
+  try {
+    if(gradesSummary && (gradesSummary.strongBuy||gradesSummary.buy||gradesSummary.hold||gradesSummary.sell||gradesSummary.strongSell)) {
+      // grades-summary returns direct counts
+      recTrend = [{
+        strongBuy: gradesSummary.strongBuy||0,
+        buy: gradesSummary.buy||0,
+        hold: gradesSummary.hold||0,
+        sell: gradesSummary.sell||0,
+        strongSell: gradesSummary.strongSell||0
+      }];
+    } else if(grades && grades.length) {
+      // /grade/ returns array of individual grade actions — count recent ones
+      var sb=0,b=0,h=0,s=0,ss=0;
+      grades.slice(0,10).forEach(g=>{
+        var act=(g.newGrade||g.action||'').toLowerCase();
+        if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')) sb++;
+        else if(act.includes('buy')||act.includes('positive')) b++;
+        else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')) h++;
+        else if(act.includes('strong sell')||act.includes('underperform')||act.includes('underweight')) ss++;
+        else if(act.includes('sell')||act.includes('negative')||act.includes('reduce')) s++;
+        else h++; // default unknown to hold
+      });
+      if(sb+b+h+s+ss>0) recTrend=[{strongBuy:sb,buy:b,hold:h,sell:s,strongSell:ss}];
+    }
+  } catch(e) {}
 
   // Normalize earnings calendar
   var calResult = {earningsCalendar:[]};
@@ -1273,13 +1340,19 @@ function openSettings(){
   var b = document.getElementById('banner');
   b.style.display = 'block';
   b.scrollIntoView({behavior:'smooth'});
-  // Re-populate fields with saved keys
   var fk=localStorage.getItem('wi_fh')||'';
   var tk=localStorage.getItem('wi_td')||'';
   var mk=localStorage.getItem('wi_fmp')||'';
   if(fk) document.getElementById('fhKey').value=fk;
   if(tk) document.getElementById('tdKey').value=tk;
   if(mk) document.getElementById('fmpKey').value=mk;
+}
+
+function clearAllCaches(){
+  // Clear candle cache and FMP cache — forces fresh fetch on next refresh
+  var keys = Object.keys(localStorage).filter(k=>k.startsWith('cd_')||k.startsWith('fmp_'));
+  keys.forEach(k=>localStorage.removeItem(k));
+  alert('✓ All caches cleared ('+keys.length+' items). Hit Refresh All to reload fresh data.');
 }
 
 function openGL(){
