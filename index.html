@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.13 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.14 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -246,6 +246,9 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   </button>
   <button class="btn-ref" onclick="runDiagnostics()" title="Test all API connections">
     🔬 Diagnostics
+  </button>
+  <button class="btn-ref" onclick="nuclearReset()" title="Hard reset — clears everything including in-memory data" style="color:var(--red);border-color:var(--red);">
+    ⚡ Hard Reset
   </button>
   <span class="lupd" id="lupd"></span>
   <span id="progTxt" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
@@ -559,9 +562,11 @@ async function fmpFundamentals(ticker) {
   var insResult = {data:[]};
   if(insiderData && insiderData.length) {
     insResult.data = insiderData.map(t=>({
-      transactionDate: t.transactionDate,
-      transactionCode: (t.transactionType||'').indexOf('P')>=0?'P':'S',
-      share: Math.abs(t.securitiesTransacted||0)
+      transactionDate: t.transactionDate||t.filingDate||'',
+      // v4 uses transactionType: "P-Purchase" or "S-Sale" etc
+      transactionCode: (t.transactionType||t.acquistionOrDisposition||'')
+        .toUpperCase().indexOf('P')>=0?'P':'S',
+      share: Math.abs(t.securitiesTransacted||t.sharesTransacted||t.shares||0)
     }));
   }
 
@@ -753,10 +758,9 @@ async function refreshAll() {
   btn.classList.add('spinning');
   var prog=document.getElementById('progTxt');
 
-  // Only clear tickers that don't have good data yet (or all if full refresh)
-  var toLoad = WATCHLIST.filter(t=>!DATA[t]||DATA[t].err);
-  var isFullRefresh = toLoad.length===0;
-  if(isFullRefresh) toLoad=[...WATCHLIST]; // full re-fetch if everything already loaded
+  // Always do a full refresh when user explicitly hits Refresh All
+  // This ensures stale in-memory scores (like RSI) get recalculated from fresh candles
+  var toLoad = [...WATCHLIST];
 
   // Show loading rows only for tickers being fetched
   toLoad.forEach(t=>{
@@ -1380,14 +1384,44 @@ function openSettings(){
 }
 
 function clearAllCaches(){
-  var keys = Object.keys(localStorage).filter(k=>k.startsWith('cd_')||k.startsWith('fmp_'));
-  keys.forEach(k=>localStorage.removeItem(k));
+  // Nuclear clear — remove ALL cache keys regardless of format
+  var keys = Object.keys(localStorage).filter(k=>
+    k.startsWith('cd_') || k.startsWith('fmp_') || 
+    k.startsWith('candle_') || k.startsWith('wi_cache') ||
+    k === 'wi_candles'
+  );
+  // Also clear any leftover candle data stored under old formats
+  var allKeys = Object.keys(localStorage);
+  allKeys.forEach(k=>{
+    if(k.startsWith('cd_')||k.startsWith('fmp_')||k.endsWith('_candles')||k.endsWith('_ts')) {
+      // Only remove cache keys, not API keys
+      if(!k.startsWith('wi_fh')&&!k.startsWith('wi_td')&&!k.startsWith('wi_fmp')&&
+         !k.startsWith('wi_uw')&&k!=='wi_list') {
+        localStorage.removeItem(k);
+        keys.push(k);
+      }
+    }
+  });
+  // Also clear in-memory DATA cache so scores recalculate
+  DATA = {};
   alert('✓ All caches cleared ('+keys.length+' items). Hit Refresh All to reload fresh data.');
 }
 
 // ── DIAGNOSTIC PANEL ──────────────────────────────────
 function closeDiagnostics(){
   document.getElementById('diagPanel').style.display='none';
+}
+
+function nuclearReset(){
+  if(!confirm('Hard reset: clears ALL cached data and reloads everything from scratch. Continue?')) return;
+  // Clear every localStorage key except API keys and watchlist
+  Object.keys(localStorage).forEach(k=>{
+    if(k!=='wi_fh'&&k!=='wi_td'&&k!=='wi_fmp'&&k!=='wi_uw'&&k!=='wi_list')
+      localStorage.removeItem(k);
+  });
+  DATA={};
+  renderTable();
+  refreshAll();
 }
 
 async function runDiagnostics() {
@@ -1487,32 +1521,4 @@ async function runDiagnostics() {
   // Test 8: Yahoo via corsproxy
   try {
     var end2=Math.floor(Date.now()/1000), start2=end2-10*86400;
-    var yUrl2='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start2+'&period2='+end2;
-    var t8 = await fetchWithTimeout('https://corsproxy.io/?url='+encodeURIComponent(yUrl2), 9000);
-    var w8 = await t8.json();
-    var ok8 = w8&&w8.chart&&w8.chart.result&&w8.chart.result[0];
-    add('Yahoo via corsproxy AAPL', ok8?'OK':'FAIL', ok8?'closes='+w8.chart.result[0].indicators.quote[0].close.length:'HTTP '+t8.status);
-  } catch(e) { add('Yahoo via corsproxy AAPL', 'FAIL', e.message); }
-
-  // Test 9: Yahoo via thingproxy
-  try {
-    var end3=Math.floor(Date.now()/1000), start3=end3-10*86400;
-    var yUrl3='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start3+'&period2='+end3;
-    var t9 = await fetchWithTimeout('https://thingproxy.freeboard.io/fetch/'+yUrl3, 9000);
-    var w9 = await t9.json();
-    var ok9 = w9&&w9.chart&&w9.chart.result&&w9.chart.result[0];
-    add('Yahoo via thingproxy AAPL', ok9?'OK':'FAIL', ok9?'closes='+w9.chart.result[0].indicators.quote[0].close.length:'HTTP '+t9.status);
-  } catch(e) { add('Yahoo via thingproxy AAPL', 'FAIL', e.message); }
-
-  add('─── Complete ───', '✓', 'Share these results to diagnose issues');
-}
-
-function openGL(){
-  var blob=new Blob([buildGlossary()],{type:'text/html'});
-  window.open(URL.createObjectURL(blob),'_blank','noopener');
-}
-
-init();
-</script>
-</body>
-</html>
+    var yUrl2='https://query1.finance.yahoo.com/v8
