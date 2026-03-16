@@ -624,6 +624,7 @@ function buildFallback(quote, metrics) {
 
 // ── LOAD ONE TICKER ───────────────────────────────────
 async function loadTickerCore(ticker) {
+  try {
     // Step 1: Finnhub calls in parallel (fast, 3 calls)
     var [quote, profile, metrics] = await Promise.all([
       fhGet('/quote?symbol='+ticker),
