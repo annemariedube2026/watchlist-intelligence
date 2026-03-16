@@ -1521,4 +1521,32 @@ async function runDiagnostics() {
   // Test 8: Yahoo via corsproxy
   try {
     var end2=Math.floor(Date.now()/1000), start2=end2-10*86400;
-    var yUrl2='https://query1.finance.yahoo.com/v8
+    var yUrl2='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start2+'&period2='+end2;
+    var t8 = await fetchWithTimeout('https://corsproxy.io/?url='+encodeURIComponent(yUrl2), 9000);
+    var w8 = await t8.json();
+    var ok8 = w8&&w8.chart&&w8.chart.result&&w8.chart.result[0];
+    add('Yahoo via corsproxy AAPL', ok8?'OK':'FAIL', ok8?'closes='+w8.chart.result[0].indicators.quote[0].close.length:'HTTP '+t8.status);
+  } catch(e) { add('Yahoo via corsproxy AAPL', 'FAIL', e.message); }
+
+  // Test 9: Yahoo via thingproxy
+  try {
+    var end3=Math.floor(Date.now()/1000), start3=end3-10*86400;
+    var yUrl3='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start3+'&period2='+end3;
+    var t9 = await fetchWithTimeout('https://thingproxy.freeboard.io/fetch/'+yUrl3, 9000);
+    var w9 = await t9.json();
+    var ok9 = w9&&w9.chart&&w9.chart.result&&w9.chart.result[0];
+    add('Yahoo via thingproxy AAPL', ok9?'OK':'FAIL', ok9?'closes='+w9.chart.result[0].indicators.quote[0].close.length:'HTTP '+t9.status);
+  } catch(e) { add('Yahoo via thingproxy AAPL', 'FAIL', e.message); }
+
+  add('─── Complete ───', '✓', 'Share these results to diagnose issues');
+}
+
+function openGL(){
+  var blob=new Blob([buildGlossary()],{type:'text/html'});
+  window.open(URL.createObjectURL(blob),'_blank','noopener');
+}
+
+init();
+</script>
+</body>
+</html>
