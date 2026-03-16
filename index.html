@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.20 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.22 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -978,7 +978,10 @@ function scores(ticker){
 
   var slope=calcSlope(closes,20);
   var rsiNow=calcRSI(closes,14);
-  var rsiTrnd=closes.length>24?clamp(50+(calcRSI(closes.slice(-14),14)-calcRSI(closes.slice(-24,-10),14))*2,0,100):50;
+  // RSI Trend: delta × 1.5 instead of × 2 — less exaggerated, more honest
+  // +15 delta → score 72 (strong), +5 → score 57 (building), 0 → 50 (flat), -10 → 35 (weakening)
+  var rsiDelta=closes.length>24?Math.round((calcRSI(closes.slice(-14),14)-calcRSI(closes.slice(-24,-10),14))*10)/10:0;
+  var rsiTrnd=closes.length>24?clamp(50+rsiDelta*1.5,0,100):50;
   var macd=calcMACD(closes);
   var decay=calcDecay(closes);
   var mom=clamp(slope*.30+rsiTrnd*.25+macd*.30+(100-decay)*.15,0,100);
@@ -996,14 +999,17 @@ function scores(ticker){
     (vols.slice(-5).reduce((a,b)=>a+b,0)/5)/(vols.slice(-20).reduce((a,b)=>a+b,0)/20):1;
   var ma20=closes.length>=20?closes.slice(-20).reduce((a,b)=>a+b,0)/20:price;
   var accum=clamp((price>ma20?60:40)+(block-50)*.4,0,100);
-  var smart=clamp(block*.40+clamp(volRat*50,0,100)*.35+accum*.25,0,100);
+  // Vol Ratio score: 1.0× = neutral(50), 2.0× = strong(83), 3.0×+ = max(100), 0.5× = weak(25)
+  var volRatScore=clamp((volRat-0.5)/2.5*100,0,100); // 0.5× floor, 3.0× ceiling
+  var smart=clamp(block*.40+volRatScore*.35+accum*.25,0,100);
 
   var h52=mm['52WeekHigh']||price*1.3, l52=mm['52WeekLow']||price*0.7;
   var r52=(h52-l52)?(price-l52)/(h52-l52)*100:50;
   var ready=clamp(mom*.4+(100-r52)*.3+slope*.3,0,100);
 
-  var d20dma=ma20?clamp(Math.abs((price-ma20)/ma20*100)*5,0,100):0;
-  var exhaust=clamp((rsiNow/100)*40+d20dma*.40+decay*.20,0,100);
+  var d20pct=ma20?Math.round(Math.abs((price-ma20)/ma20*100)*10)/10:0; // real % e.g. 2.2
+  var d20score=clamp(d20pct/15*100,0,100); // normalized: 15%+ = fully extended (score 100)
+  var exhaust=clamp((rsiNow/100)*40+d20score*.40+decay*.20,0,100);
 
   var analystData=calcAnalyst(d.recTrend,d.priceTarget,price);
   var earnData=calcEarnings(d.calendar);
@@ -1016,18 +1022,19 @@ function scores(ticker){
   return{
     price,chg,setup:Math.round(setup),
     readiness:Math.round(ready),exhaustion:Math.round(exhaust),
-    mom:Math.round(mom),slope:Math.round(slope),rsiTrnd:Math.round(rsiTrnd),
+    mom:Math.round(mom),slope:Math.round(slope),rsiTrnd:Math.round(rsiTrnd),rsiDelta:rsiDelta,
     macd:Math.round(macd),decay:Math.round(decay),
     val:Math.round(val),pevs:Math.round(pevs),pevm:Math.round(pevm),evs:Math.round(evs),
     smart:Math.round(smart),block:Math.round(block),accum:Math.round(accum),
     volRat:Math.round(volRat*100)/100,
+      volRatScore:Math.round(volRatScore),
     analyst:analystData.score,analystUpside:analystData.upside,analystHasData:analystData.hasData,
     earn:earnData,insider:insiderData,
     sig,
     raw:{
       rsi:Math.round(rsiNow),pe:pe?pe.toFixed(1):'N/A',ev:ev?ev.toFixed(1):'N/A',
       h52:h52?h52.toFixed(2):'N/A',l52:l52?l52.toFixed(2):'N/A',
-      r52:Math.round(r52),d20:Math.round(d20dma),candles:closes.length,
+      r52:Math.round(r52),d20:d20pct,d20score:Math.round(d20score),candles:closes.length,
       candleSrc:c.s||'unknown',price,pc:q.pc||0,sectorPE,industry:industry||'Unknown',
       ptMean:d.priceTarget&&d.priceTarget.targetMean?d.priceTarget.targetMean.toFixed(2):'N/A',
       ptHigh:d.priceTarget&&d.priceTarget.targetHigh?d.priceTarget.targetHigh.toFixed(2):'N/A',
@@ -1216,14 +1223,22 @@ function renderSection(ticker){
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ff3d57;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(255,61,87,.18);">↑ EXHAUSTION &nbsp;<span style="opacity:.55;font-size:8px;">HIGH=RED=BAD</span></div>
       ${sbRow('RSI (14)', s.raw.rsi, true)}
-      ${sbRow('Dist 20DMA', s.raw.d20, true)}
+      <div class="sbar-row">
+        <span class="sbar-lbl" style="width:90px;flex-shrink:0;">Dist 20DMA</span>
+        <div class="sbar-t"><div class="sbar-f" style="width:${Math.min(s.raw.d20score||0,100)}%;background:${(s.raw.d20||0)>=12?'var(--red)':(s.raw.d20||0)>=7?'var(--yellow)':(s.raw.d20||0)>=3?'var(--accent)':'var(--green)'};"></div></div>
+        <span class="sbar-v" style="color:${(s.raw.d20||0)>=12?'var(--red)':(s.raw.d20||0)>=7?'var(--yellow)':(s.raw.d20||0)>=3?'var(--accent)':'var(--green)'};">${s.raw.d20}%</span>
+      </div>
       ${sbRow('Decay', s.decay, true)}
     </div>`;
 
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ MOMENTUM inputs</div>
       ${sbRow('Slope Strength', s.slope, false)}
-      ${sbRow('RSI Trend', s.rsiTrnd, false)}
+      <div class="sbar-row">
+        <span class="sbar-lbl" style="width:90px;flex-shrink:0;">RSI Trend</span>
+        <div class="sbar-t"><div class="sbar-f" style="width:${s.rsiTrnd}%;background:${s.rsiTrnd>=70?'var(--green)':s.rsiTrnd>=45?'var(--accent)':s.rsiTrnd>=30?'var(--yellow)':'var(--red)'};"></div></div>
+        <span class="sbar-v" style="color:${s.rsiTrnd>=70?'var(--green)':s.rsiTrnd>=45?'var(--accent)':s.rsiTrnd>=30?'var(--yellow)':'var(--red)'};">${s.rsiTrnd} <span style="font-size:9px;opacity:.7;">(Δ${s.raw.rsiDelta>0?'+':''}${s.raw.rsiDelta})</span></span>
+      </div>
       ${sbRow('MACD Impulse', s.macd, false)}
       ${sbRow('Mom. Holding', 100-s.decay, false)}
     </div>`;
@@ -1252,7 +1267,11 @@ function renderSection(ticker){
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#a78bfa;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(167,139,250,.18);">↑ SMART $ &nbsp;<span style="opacity:.55;font-size:8px;">volume proxy</span></div>
       ${sbRow('Block Proxy', s.block, false)}
-      ${sbRow('Vol Ratio', Math.round(s.volRat*50), false)}
+      <div class="sbar-row">
+        <span class="sbar-lbl" style="width:90px;flex-shrink:0;">Vol Ratio</span>
+        <div class="sbar-t"><div class="sbar-f" style="width:${Math.min(s.raw.volRatScore||0,100)}%;background:${(s.raw.volRatScore||0)>=70?'var(--green)':(s.raw.volRatScore||0)>=45?'var(--accent)':(s.raw.volRatScore||0)>=30?'var(--yellow)':'var(--red)'};"></div></div>
+        <span class="sbar-v" style="color:${(s.raw.volRatScore||0)>=70?'var(--green)':(s.raw.volRatScore||0)>=45?'var(--accent)':(s.raw.volRatScore||0)>=30?'var(--yellow)':'var(--red)'};">${s.volRat}×</span>
+      </div>
       ${sbRow('Accumulation', s.accum, false)}
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">Upgrades to real dark pool data when UW connected</div>
     </div>`;
@@ -1310,7 +1329,7 @@ function renderSection(ticker){
             <div class="aform">${rn}<br>Formula: 100−100/(1+AvgGain/AvgLoss) 14d</div>
           </div>
           ${aitem('Decay Score',s.decay,'HIGH=momentum fading (trim/avoid). LOW=momentum strong (hold/enter). Color inverted: red=high=bad.','exhaust')}
-          ${aitem('Dist 20DMA',s.raw.d20+'pts','Distance from 20-day MA. HIGH=overextended (trim). LOW=near MA=clean entry zone.','exhaust')}
+          ${aitem('Dist 20DMA',s.raw.d20+'%','Real % distance from 20-day MA. 0-3%=green(at MA). 3-7%=blue. 7-12%=yellow. 12%+=red(overextended). Formula: |Price−MA20|/MA20×100','exhaust')}
           ${aitem('Slope Score',s.slope,'Linear regression 20d closes. High=steep uptrend. Low=flat/down.','mom')}
           ${aitem('MACD Score',s.macd,'(EMA12−EMA26)/price×600+50. High=buyers in control.','mom')}
           ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM','val')}
@@ -1329,7 +1348,7 @@ function renderSection(ticker){
           ${aitem('Rec: Sell',s.raw.recSell,'FMP analyst strongSell+sell count','analyst')}
           ${aitem('Block Proxy',s.block,'UpVol/(UpVol+DnVol)×100 over 20 days','smart')}
           ${aitem('Accum Score',s.accum,'(Price>MA20?60:40)+(BlockProxy−50)×0.4','smart')}
-          ${aitem('Vol Ratio',s.volRat+'×','Avg 5d vol ÷ Avg 20d vol. >1=rising participation','smart')}
+          ${aitem('Vol Ratio',s.volRat+'×','Real ratio: Avg 5d vol ÷ Avg 20d vol. 1.0×=neutral. 2.0×=strong participation. 3.0×+=max. Score normalized: 0.5× floor to 3.0× ceiling.','smart')}
           ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','FMP /earning_calendar → next date. ⚠ within 14d=caution','context')}
           ${aitem('Days to Earn',s.earn?s.earn.days+'d':'N/A','Days until next earnings report','context')}
           ${aitem('Insider Net 90d',(s.raw.insiderNet||0).toLocaleString(),'FMP /insider-trading. Purchases−Sales last 90 days.','context')}
@@ -1374,13 +1393,14 @@ var GL=[
   {sec:'Composite Scores',items:[
     {n:'Setup Score',t:'Composite',s:'context',d:'Blended score summarizing overall trade setup quality. Used internally to determine Signal.',f:'Momentum×30% + Valuation×20% + Smart$×20% + Readiness×15% + Analyst×15%'},
     {n:'Trade Readiness',t:'Execution Timing',s:'context',d:'How close to a clean entry point. HIGH = good timing. LOW = not set up or already extended.',f:'Momentum×40% + (100−52W Range%)×30% + Slope×30%'},
-    {n:'Trade Exhaustion',t:'Risk / Late-Stage',s:'context',d:'HIGH = GET OUT / STAY OUT. Move is overextended, reversal risk elevated. LOW = fresh move with room to run, favorable for entries. Color INVERTED: red=high=danger.',f:'(RSI/100)×40% + Dist 20DMA×40% + Decay×20%'},
+    {n:'Trade Exhaustion',t:'Risk / Late-Stage',s:'context',d:'HIGH = GET OUT / STAY OUT. Move is overextended, reversal risk elevated. LOW = fresh move with room to run, favorable for entries. Color INVERTED: red=high=danger.',f:'(RSI/100)×40% + Dist 20DMA score×40% + Decay×20%'},
+    {n:'Dist 20DMA',t:'Exhaustion Input',s:'context',d:'Real % distance of price from the 20-day moving average. Near the MA = clean entry zone. Far above = overextended, reversal risk. Color: 🟢 0–3% = at MA, 🔵 3–7% = modest, 🟡 7–12% = stretched, 🔴 12%+ = overextended.',f:'|Price − MA20| / MA20 × 100. Shown as real %. Score for exhaustion formula: pct/15×100'},
   ]},
   {sec:'Momentum',items:[
     {n:'Momentum Quality',t:'Momentum',s:'context',d:'Is the trend clean, persistent, and directional? HIGH = stay in or enter. LOW = weak/broken trend, be cautious.',f:'Slope×30% + RSI Trend×25% + MACD×30% + (100−Decay)×15%'},
     {n:'Slope Strength',t:'Momentum',s:'context',d:'Angle of price trend over last 20 days from linear regression. High = steep uptrend. Low = flat or declining.',f:'Linear regression slope of 20 closes, normalized 0–100'},
-    {n:'RSI Trend',t:'Momentum',s:'context',d:'Is RSI rising or falling? Rising RSI + rising price = healthy momentum. Falling RSI while price rises = warning of weakening momentum.',f:'RSI(14) now vs 10 days ago: 50 + delta×2'},
-    {n:'MACD Impulse',t:'Momentum',s:'context',d:'Is the fast MA pulling away from the slow MA? High = buyers in control, momentum building.',f:'(EMA12−EMA26)/price×600+50'},
+    {n:'RSI Trend',t:'Momentum',s:'context',d:'Is RSI rising or falling? Rising RSI + rising price = healthy momentum. Falling RSI while price rises = divergence warning. The actual delta is shown in brackets on the dashboard e.g. (Δ+8) means RSI rose 8 points over 10 days.',f:'50 + (RSI now − RSI 10 days ago) × 1.5. Strong: delta > +10. Building: delta +3 to +10. Flat: delta −3 to +3. Weakening: delta < −3.'},
+    {n:'MACD Impulse',t:'Momentum',s:'context',d:'Is the fast MA pulling away from the slow MA? High = buyers in control, momentum building. This is a derived 0–100 score, not a raw MACD value. Score 50 = neutral (MAs converging). Above 50 = bullish divergence. Below 50 = bearish.',f:'Derived score: (EMA12−EMA26)/price normalized to 0–100. ×600 scaling factor converts tiny price ratios to readable 0–100 range.'},
     {n:'Momentum Decay',t:'Momentum',s:'context',d:'HIGH DECAY = GET OUT / STAY OUT. Move losing steam like a car slowing down. LOW = momentum still building. Color INVERTED: red=high=bad.',f:'5-day move vs 20-day move ratio. >1.1=score 15, >0.8=38, >0.4=62, else=80'},
     {n:'Momentum Holding',t:'Momentum',s:'context',d:'Inverse of Decay — how well momentum is being sustained. HIGH = good, momentum intact.',f:'100 − Decay Score'},
   ]},
@@ -1405,7 +1425,7 @@ var GL=[
     {n:'Smart Money Score',t:'Volume Proxy',s:'context',d:'Currently modeled from volume patterns. Will be upgraded by Unusual Whales real dark pool and block trade data when connected.',f:'Block Proxy×40% + Volume Ratio×35% + Accumulation×25%'},
     {n:'Block Trade Proxy',t:'Volume Proxy',s:'context',d:'On up-days, was volume heavy? On down-days, was it light? Asymmetric volume = institutional accumulation pattern.',f:'UpVol/(UpVol+DnVol)×100 over 20 days'},
     {n:'Accumulation Trend',t:'Volume Proxy',s:'context',d:'Is price above 20-day MA with confirming volume? Above MA + heavy up-volume = accumulation mode.',f:'(Price>MA20?60:40)+(BlockProxy−50)×0.4'},
-    {n:'Volume Ratio',t:'Volume Proxy',s:'context',d:'Rising participation? >1.0 = more active than normal. <0.7 = drying up.',f:'Avg 5-day volume ÷ Avg 20-day volume'},
+    {n:'Volume Ratio',t:'Volume Proxy',s:'context',d:'Real ratio of recent vs average volume. Shows as actual multiple e.g. 1.4×. 1.0× = neutral. 2.0×+ = strong rising participation. 0.5× = drying up. Score normalized: 0.5× = 0, 1.0× = 20, 2.0× = 60, 3.0×+ = 100.',f:'Avg 5-day volume ÷ Avg 20-day volume. Score: (ratio−0.5)/2.5×100'},
   ]},
   {sec:'CHG%',items:[
     {n:'CHG%',t:'Price Action',s:'context',d:'Today\'s price change vs yesterday\'s close. Same-day metric only — not weekly or longer.',f:'(Current Price − Previous Close) / Previous Close × 100'},
