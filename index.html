@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.11 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.13 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -309,11 +309,18 @@ async function tdGet(path) {
 }
 
 async function fmpGet(path) {
-  var sep=path.indexOf('?')>=0?'&':'?';
-  var r=await fetch('https://financialmodelingprep.com/api/v3'+path+sep+'apikey='+FMP_KEY);
+  // FMP migrated from /api/v3 to /stable in 2025
+  // v4 paths stay as /api/v4, everything else uses /stable
+  var sep = path.indexOf('?')>=0 ? '&' : '?';
+  var base = path.startsWith('/api/v4') 
+    ? 'https://financialmodelingprep.com'
+    : 'https://financialmodelingprep.com/stable';
+  var fullPath = path.startsWith('/api/v4') ? path : path;
+  var r = await fetch(base+fullPath+sep+'apikey='+FMP_KEY);
   if(!r.ok) throw new Error('FMP HTTP '+r.status);
-  var d=await r.json();
+  var d = await r.json();
   if(d&&d['Error Message']) throw new Error('FMP: '+d['Error Message']);
+  if(Array.isArray(d)&&d[0]&&d[0]['Error Message']) throw new Error('FMP: '+d[0]['Error Message']);
   return d;
 }
 
@@ -363,16 +370,18 @@ async function yahooCandles(ticker) {
   var yahooUrl2 = 'https://query2.finance.yahoo.com/v8/finance/chart/'+ticker
     +'?interval=1d&period1='+start+'&period2='+end;
 
-  // Four proxy strategies — different wrapping behavior noted per proxy
+  // Five proxy strategies with different wrapping behaviors
   var attempts = [
     // allorigins wraps response in {contents: "...json string..."}
     {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl), wrap:'allorigins'},
-    // corsproxy.io returns the response directly
-    {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl), wrap:'direct'},
-    // thingproxy is reliable backup
-    {url:'https://thingproxy.freeboard.io/fetch/'+yahooUrl, wrap:'direct'},
-    // allorigins with query2 as final try
+    // allorigins with query2
     {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl2), wrap:'allorigins'},
+    // corsproxy.io — correct format
+    {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl), wrap:'direct'},
+    // cors-anywhere style proxy
+    {url:'https://cors-anywhere.herokuapp.com/'+yahooUrl, wrap:'direct'},
+    // thingproxy
+    {url:'https://thingproxy.freeboard.io/fetch/'+yahooUrl, wrap:'direct'},
   ];
 
   for(var i=0;i<attempts.length;i++) {
@@ -475,39 +484,39 @@ async function fmpFundamentals(ticker) {
 
   // Call 1: Grades summary — current endpoint (replaces legacy analyst-stock-recommendations)
   // Returns consolidated strongBuy/buy/hold/sell/strongSell counts
-  var gradesSummary = await fmpGet('/grades-summary/'+ticker).catch(()=>null);
+  var gradesSummary = await fmpGet('/grades-summary?symbol='+ticker).catch(()=>null);
   await fmpDelay();
 
   // Call 1b: Fallback to historical grades if summary empty
   var grades = [];
   if(!gradesSummary || (!gradesSummary.strongBuy && !gradesSummary.buy && !gradesSummary.hold)) {
-    grades = await fmpGet('/grade/'+ticker+'?limit=10').catch(()=>[]);
+    grades = await fmpGet('/grades?symbol='+ticker+'&limit=10').catch(()=>[]);
     await fmpDelay();
   }
 
   // Call 2: Price target consensus — dedicated endpoint, more reliable than estimates
-  var ptConsensus = await fmpGet('/price-target-consensus?symbol='+ticker).catch(()=>null);
+  var ptConsensus = await fmpGet('/price-target-summary?symbol='+ticker).catch(()=>null);
   await fmpDelay();
 
   // Call 3: Earnings surprises — gives us next date + beat/miss history
-  var earningsData = await fmpGet('/earning_calendar?symbol='+ticker).catch(()=>[]);
+  var earningsData = await fmpGet('/earnings-calendar?symbol='+ticker).catch(()=>[]);
   await fmpDelay();
 
   // Call 4: Insider trading
-  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
+  var insiderData = await fmpGet('/api/v4/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
 
   // Price target from consensus endpoint
   var ptResult = {};
   try {
     if(ptConsensus) {
-      // FMP /price-target-consensus returns {symbol, targetHigh, targetLow, targetMean, targetMedian}
+      // /price-target-summary returns {symbol, lastMonth, lastQuarter, lastYear, ...}
+      // or array of {targetHigh, targetLow, targetMean, targetMedian, targetConsensus}
       var pt = Array.isArray(ptConsensus) ? ptConsensus[0] : ptConsensus;
-      if(pt && (pt.targetMean||pt.targetConsensus)) {
-        ptResult = {
-          targetMean: pt.targetMean||pt.targetConsensus||0,
-          targetHigh: pt.targetHigh||0,
-          targetLow:  pt.targetLow||0
-        };
+      if(pt) {
+        var mean = pt.targetMean||pt.targetConsensus||pt.lastMonth||0;
+        var high = pt.targetHigh||pt.lastMonthHigh||0;
+        var low  = pt.targetLow||pt.lastMonthLow||0;
+        if(mean) ptResult = {targetMean:mean, targetHigh:high, targetLow:low};
       }
     }
   } catch(e) {}
@@ -793,10 +802,21 @@ function calcSlope(arr,n){
   return clamp(50+(slope/ym)*100*40,0,100);
 }
 function calcRSI(arr,p){
-  p=p||14; if(arr.length<p+2)return 50;
-  var g=0,l=0;
-  for(var i=arr.length-p;i<arr.length;i++){var d=arr[i]-arr[i-1];if(d>0)g+=d;else l-=d;}
-  var ag=g/p,al=l/p; if(al===0)return 100; return 100-100/(1+ag/al);
+  p=p||14;
+  if(arr.length<p+2) return 50;
+  // Use last p+1 closes to get p differences
+  var slice = arr.slice(-(p+1));
+  var gains=[], losses=[];
+  for(var i=1;i<slice.length;i++){
+    var diff=slice[i]-slice[i-1];
+    gains.push(diff>0?diff:0);
+    losses.push(diff<0?-diff:0);
+  }
+  var ag=gains.reduce((a,b)=>a+b,0)/p;
+  var al=losses.reduce((a,b)=>a+b,0)/p;
+  if(al===0) return 100;
+  if(ag===0) return 0;
+  return Math.round(100-100/(1+ag/al));
 }
 function calcMACD(arr){
   if(arr.length<27)return 50;
@@ -1366,11 +1386,23 @@ function clearAllCaches(){
 }
 
 // ── DIAGNOSTIC PANEL ──────────────────────────────────
+function closeDiagnostics(){
+  document.getElementById('diagPanel').style.display='none';
+}
+
 async function runDiagnostics() {
   var d = document.getElementById('diagPanel');
   d.style.display = 'block';
   d.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--accent);padding:12px;">Running diagnostics…</div>';
   var lines = [];
+  var render = () => {
+    d.innerHTML = '<div style="padding:12px;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
+      +'<div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em;">🔬 DIAGNOSTICS</div>'
+      +'<button onclick="closeDiagnostics()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;">✕ Close</button>'
+      +'</div>'
+      + lines.join('') + '</div>';
+  };
   var add = (label, status, detail) => {
     var col = status==='OK'?'var(--green)':status==='FAIL'?'var(--red)':'var(--yellow)';
     lines.push('<div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid var(--border);">'
@@ -1378,9 +1410,7 @@ async function runDiagnostics() {
       +'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:'+col+';width:40px;flex-shrink:0;">'+status+'</span>'
       +'<span style="font-family:var(--mono);font-size:10px;color:var(--text3);">'+detail+'</span>'
       +'</div>');
-    d.innerHTML = '<div style="padding:12px;">'
-      +'<div style="font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:10px;letter-spacing:.1em;">🔬 DIAGNOSTICS</div>'
-      + lines.join('') + '</div>';
+    render();
   };
 
   // Test 1: Finnhub
@@ -1392,40 +1422,41 @@ async function runDiagnostics() {
   // Test 2: FMP grades-summary
   if(FMP_KEY) {
     try {
-      var t2 = await fetch('https://financialmodelingprep.com/api/v3/grades-summary/AAPL?apikey='+FMP_KEY);
+      var t2 = await fetch('https://financialmodelingprep.com/stable/grades-summary?symbol=AAPL&apikey='+FMP_KEY);
       var d2 = await t2.json();
       if(d2&&d2['Error Message']) throw new Error(d2['Error Message']);
-      add('FMP /grades-summary AAPL', t2.ok?'OK':'FAIL',
-        t2.ok ? 'strongBuy='+(d2.strongBuy||0)+' buy='+(d2.buy||0)+' hold='+(d2.hold||0) : 'HTTP '+t2.status);
-    } catch(e) { add('FMP /grades-summary AAPL', 'FAIL', e.message); }
+      var g2 = Array.isArray(d2)?d2[0]:d2;
+      add('FMP /stable/grades-summary AAPL', t2.ok?'OK':'FAIL',
+        t2.ok ? 'strongBuy='+(g2&&g2.strongBuy||0)+' buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0) : 'HTTP '+t2.status);
+    } catch(e) { add('FMP /stable/grades-summary AAPL', 'FAIL', e.message); }
 
-    // Test 3: FMP price-target-consensus
+    // Test 3: FMP price-target-summary
     try {
-      var t3 = await fetch('https://financialmodelingprep.com/api/v3/price-target-consensus?symbol=AAPL&apikey='+FMP_KEY);
+      var t3 = await fetch('https://financialmodelingprep.com/stable/price-target-summary?symbol=AAPL&apikey='+FMP_KEY);
       var d3 = await t3.json();
       if(d3&&d3['Error Message']) throw new Error(d3['Error Message']);
       var pt = Array.isArray(d3)?d3[0]:d3;
-      add('FMP /price-target-consensus AAPL', t3.ok?'OK':'FAIL',
-        t3.ok ? 'mean=$'+(pt&&pt.targetMean?pt.targetMean.toFixed(2):'N/A') : 'HTTP '+t3.status);
-    } catch(e) { add('FMP /price-target-consensus AAPL', 'FAIL', e.message); }
+      add('FMP /stable/price-target-summary AAPL', t3.ok?'OK':'FAIL',
+        t3.ok ? 'data='+JSON.stringify(pt).substring(0,80) : 'HTTP '+t3.status);
+    } catch(e) { add('FMP /stable/price-target-summary AAPL', 'FAIL', e.message); }
 
-    // Test 4: FMP earning_calendar
+    // Test 4: FMP earnings-calendar
     try {
-      var t4 = await fetch('https://financialmodelingprep.com/api/v3/earning_calendar?symbol=AAPL&apikey='+FMP_KEY);
+      var t4 = await fetch('https://financialmodelingprep.com/stable/earnings-calendar?symbol=AAPL&apikey='+FMP_KEY);
       var d4 = await t4.json();
       if(d4&&d4['Error Message']) throw new Error(d4['Error Message']);
-      add('FMP /earning_calendar AAPL', t4.ok?'OK':'FAIL',
-        t4.ok ? 'records='+(Array.isArray(d4)?d4.length:0) : 'HTTP '+t4.status);
-    } catch(e) { add('FMP /earning_calendar AAPL', 'FAIL', e.message); }
+      add('FMP /stable/earnings-calendar AAPL', t4.ok?'OK':'FAIL',
+        t4.ok ? 'records='+(Array.isArray(d4)?d4.length:0)+' sample='+(d4[0]?d4[0].date:'none') : 'HTTP '+t4.status);
+    } catch(e) { add('FMP /stable/earnings-calendar AAPL', 'FAIL', e.message); }
 
-    // Test 5: FMP insider-trading
+    // Test 5: FMP insider-trading (v4)
     try {
-      var t5 = await fetch('https://financialmodelingprep.com/api/v3/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
+      var t5 = await fetch('https://financialmodelingprep.com/api/v4/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
       var d5 = await t5.json();
       if(d5&&d5['Error Message']) throw new Error(d5['Error Message']);
-      add('FMP /insider-trading AAPL', t5.ok?'OK':'FAIL',
+      add('FMP /api/v4/insider-trading AAPL', t5.ok?'OK':'FAIL',
         t5.ok ? 'records='+(Array.isArray(d5)?d5.length:0) : 'HTTP '+t5.status);
-    } catch(e) { add('FMP /insider-trading AAPL', 'FAIL', e.message); }
+    } catch(e) { add('FMP /api/v4/insider-trading AAPL', 'FAIL', e.message); }
   } else {
     add('FMP', 'SKIP', 'No FMP key saved');
   }
