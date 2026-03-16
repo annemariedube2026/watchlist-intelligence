@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.19 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.20 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -214,6 +214,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   </div>
   <div class="api-row-btn">
     <button class="btn-connect" id="connBtn" onclick="connectAPIs()">Connect &amp; Save</button>
+    <span id="connStatus" style="font-family:var(--mono);font-size:11px;margin-left:8px;"></span>
   </div>
   <div class="banner-note" style="margin-top:10px;">
     🔑 <a href="https://finnhub.io" target="_blank">finnhub.io</a> &nbsp;·&nbsp;
@@ -724,7 +725,11 @@ async function connectAPIs() {
   var tk=document.getElementById('tdKey').value.trim();
   var mk=document.getElementById('fmpKey').value.trim();
   var uk=document.getElementById('uwKey').value.trim();
-  if(!fk){alert('Please paste your Finnhub API key.\n\nGet one free at finnhub.io');return;}
+  if(!fk){
+    var st=document.getElementById('connStatus');
+    if(st) st.innerHTML='<span style="color:var(--red);">⚠ Please paste your Finnhub API key first</span>';
+    return;
+  }
   var btn=document.getElementById('connBtn');
   btn.textContent='Testing…'; btn.disabled=true;
   FH_KEY=fk; TD_KEY=tk; FMP_KEY=mk; UW_KEY=uk;
@@ -747,11 +752,14 @@ async function connectAPIs() {
     if(mk) setDot('fmp','on','FMP: Live');
     document.getElementById('banner').style.display='none';
     btn.textContent='Connected ✓';
+    var st=document.getElementById('connStatus');
+    if(st) st.innerHTML='<span style="color:var(--green);">✓ All keys saved — loading data…</span>';
     refreshAll();
   } catch(e) {
     FH_KEY=''; setDot('fh','err','Finnhub: Error');
     btn.textContent='Connect & Save'; btn.disabled=false;
-    alert('❌ Finnhub connection failed.\n\nError: '+e.message);
+    var st=document.getElementById('connStatus');
+    if(st) st.innerHTML='<span style="color:var(--red);">❌ Finnhub failed: '+e.message+'</span>';
   }
 }
 
@@ -787,6 +795,7 @@ function bulkImportConfirm() {
     save();
     renderChips();
     renderTable();
+    document.getElementById('lupd').textContent='Added '+added.length+' tickers — loading…';
     if(FH_KEY) refreshAll();
   }
 }
@@ -1482,7 +1491,7 @@ function clearAllCaches(){
   });
   // Also clear in-memory DATA cache so scores recalculate
   DATA = {};
-  alert('✓ All caches cleared ('+keys.length+' items). Hit Refresh All to reload fresh data.');
+  document.getElementById('lupd').textContent='Caches cleared — hit Refresh All';
 }
 
 // ── DIAGNOSTIC PANEL ──────────────────────────────────
@@ -1491,7 +1500,7 @@ function closeDiagnostics(){
 }
 
 function nuclearReset(){
-  if(!confirm('Hard reset: clears all cached data and reloads from scratch. API keys and watchlist are preserved. Continue?')) return;
+  // Skip confirm dialog (Edge blocks it) — just proceed
   // Explicitly save the keys and list BEFORE clearing anything
   var savedFH  = localStorage.getItem('wi_fh')||'';
   var savedTD  = localStorage.getItem('wi_td')||'';
