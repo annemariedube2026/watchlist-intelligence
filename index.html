@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.16 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.18 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -228,6 +228,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   <div class="chips" id="chips"></div>
   <input type="text" class="tinput" id="tinput" placeholder="Add ticker…" maxlength="6" onkeydown="if(event.key==='Enter')addTicker()"/>
   <button class="btn-add" onclick="addTicker()">+ Add</button>
+  <button class="btn-add" onclick="bulkImport()" style="background:rgba(124,77,255,.1);border-color:var(--purple);color:var(--purple);">⊕ Bulk Import</button>
 </div>
 
 <div class="legend">
@@ -707,7 +708,7 @@ function init() {
 
 // ── CONNECT ───────────────────────────────────────────
 async function connectAPIs() {
-  try{localStorage.removeItem('wi_fh');}catch(e){}
+  // Note: don't pre-clear wi_fh here — only clear on successful reconnect
   var fk=document.getElementById('fhKey').value.trim();
   var tk=document.getElementById('tdKey').value.trim();
   var mk=document.getElementById('fmpKey').value.trim();
@@ -750,6 +751,32 @@ function setDot(id, state, label) {
 }
 
 // ── WATCHLIST ─────────────────────────────────────────
+function bulkImport() {
+  var input = prompt('Paste comma-separated tickers:
+(e.g. AAPL, AMD, NVDA, MSFT)');
+  if(!input) return;
+  var tickers = input.toUpperCase()
+    .split(/[\s,;]+/)
+    .map(t=>t.replace(/[^A-Z\.]/g,''))
+    .filter(t=>t.length>0&&t.length<=6);
+  var added = [];
+  tickers.forEach(t=>{
+    if(t && WATCHLIST.indexOf(t)<0) {
+      WATCHLIST.push(t);
+      added.push(t);
+    }
+  });
+  if(added.length) {
+    save();
+    renderChips();
+    renderTable();
+    if(FH_KEY) refreshAll();
+    alert('✓ Added '+added.length+' tickers: '+added.join(', '));
+  } else {
+    alert('No new tickers to add — all already in watchlist.');
+  }
+}
+
 async function addTicker() {
   var input=document.getElementById('tinput');
   var t=input.value.trim().toUpperCase().replace(/[^A-Z\.]/g,'');
@@ -1450,15 +1477,30 @@ function closeDiagnostics(){
 }
 
 function nuclearReset(){
-  if(!confirm('Hard reset: clears ALL cached data and reloads everything from scratch. Continue?')) return;
-  // Clear every localStorage key except API keys and watchlist
+  if(!confirm('Hard reset: clears all cached data and reloads from scratch. API keys and watchlist are preserved. Continue?')) return;
+  // Explicitly save the keys and list BEFORE clearing anything
+  var savedFH  = localStorage.getItem('wi_fh')||'';
+  var savedTD  = localStorage.getItem('wi_td')||'';
+  var savedFMP = localStorage.getItem('wi_fmp')||'';
+  var savedUW  = localStorage.getItem('wi_uw')||'';
+  var savedList= localStorage.getItem('wi_list')||'[]';
+  // Clear ONLY cache keys
   Object.keys(localStorage).forEach(k=>{
-    if(k!=='wi_fh'&&k!=='wi_td'&&k!=='wi_fmp'&&k!=='wi_uw'&&k!=='wi_list')
-      localStorage.removeItem(k);
+    if(k.startsWith('cd_')||k.startsWith('fmp_')) localStorage.removeItem(k);
   });
+  // Restore keys and list immediately
+  if(savedFH)   localStorage.setItem('wi_fh',   savedFH);
+  if(savedTD)   localStorage.setItem('wi_td',   savedTD);
+  if(savedFMP)  localStorage.setItem('wi_fmp',  savedFMP);
+  if(savedUW)   localStorage.setItem('wi_uw',   savedUW);
+  localStorage.setItem('wi_list', savedList);
+  // Reset in-memory data and reload
   DATA={};
+  FH_KEY=savedFH; TD_KEY=savedTD; FMP_KEY=savedFMP; UW_KEY=savedUW;
+  WATCHLIST=JSON.parse(savedList);
+  renderChips();
   renderTable();
-  refreshAll();
+  if(FH_KEY) refreshAll();
 }
 
 async function runDiagnostics() {
