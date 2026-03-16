@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.8 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.11 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -244,9 +244,14 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   <button class="btn-ref" onclick="clearAllCaches()" title="Force fresh data fetch — clears candle and FMP caches">
     🗑 Clear Caches
   </button>
+  <button class="btn-ref" onclick="runDiagnostics()" title="Test all API connections">
+    🔬 Diagnostics
+  </button>
   <span class="lupd" id="lupd"></span>
   <span id="progTxt" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
 </div>
+
+<div id="diagPanel" style="display:none;margin:0 20px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;max-height:400px;overflow-y:auto;"></div>
 
 <div class="tbl-outer">
   <div style="display:grid;grid-template-columns:var(--cols);background:var(--bg4);border-bottom:1px solid var(--border2);">
@@ -1165,9 +1170,15 @@ function renderSection(ticker){
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ READINESS inputs</div>
       ${sbRow('Momentum', s.mom, false)}
-      ${sbRow('52W Room', 100-s.raw.r52, false)}
+      <div class="sbar-row">
+        <span class="sbar-lbl" style="width:90px;flex-shrink:0;">52W Position</span>
+        <div class="sbar-t"><div class="sbar-f" style="width:${s.raw.r52}%;background:${s.raw.r52>=80?'var(--red)':s.raw.r52>=60?'var(--yellow)':s.raw.r52>=25?'var(--accent)':'var(--green)'};"></div></div>
+        <span class="sbar-v" style="color:${s.raw.r52>=80?'var(--red)':s.raw.r52>=60?'var(--yellow)':s.raw.r52>=25?'var(--accent)':'var(--green)'};">${s.raw.r52}%</span>
+      </div>
       ${sbRow('Slope', s.slope, false)}
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">52W position: ${s.raw.r52}% (lower = more room to run)</div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">
+        ${s.raw.r52>=80?'⚠ Near 52W high — limited upside room':s.raw.r52<=25?'✓ Near 52W low — more room to run':'Mid-range — neutral entry zone'}
+      </div>
     </div>`;
 
     html+=`<div style="background:rgba(124,77,255,.03);padding:14px 18px;border-left:1px solid rgba(124,77,255,.15);">
@@ -1210,7 +1221,7 @@ function renderSection(ticker){
           ${aitem('EV/EBITDA',s.raw.ev,'Enterprise Value/EBITDA. 15×=fair, 25×=stretched.','val')}
           ${aitem('52W High','$'+s.raw.h52,'Finnhub metric → 52WeekHigh','val')}
           ${aitem('52W Low','$'+s.raw.l52,'Finnhub metric → 52WeekLow','val')}
-          ${aitem('52W Range%',s.raw.r52+'%','Where price sits in 52W range. (Price−Low)/(High−Low)×100','val')}
+          ${aitem('52W Range%',s.raw.r52+'%','Where price sits in its 52W range. HIGH % = near 52W high = limited upside room (red). LOW % = near 52W low = more room to run (green). Formula: (Price−Low)/(High−Low)×100','val')}
           ${aitem('Analyst Score',s.analyst,'%Buy×100−%Sell×30+30+upside×1.5. N/A if FMP not connected.','analyst')}
           ${aitem('Price Target Mean','$'+s.raw.ptMean,'FMP /price-target consensus mean','analyst')}
           ${aitem('Price Target High','$'+s.raw.ptHigh,'FMP /price-target high estimate','analyst')}
@@ -1349,10 +1360,120 @@ function openSettings(){
 }
 
 function clearAllCaches(){
-  // Clear candle cache and FMP cache — forces fresh fetch on next refresh
   var keys = Object.keys(localStorage).filter(k=>k.startsWith('cd_')||k.startsWith('fmp_'));
   keys.forEach(k=>localStorage.removeItem(k));
   alert('✓ All caches cleared ('+keys.length+' items). Hit Refresh All to reload fresh data.');
+}
+
+// ── DIAGNOSTIC PANEL ──────────────────────────────────
+async function runDiagnostics() {
+  var d = document.getElementById('diagPanel');
+  d.style.display = 'block';
+  d.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--accent);padding:12px;">Running diagnostics…</div>';
+  var lines = [];
+  var add = (label, status, detail) => {
+    var col = status==='OK'?'var(--green)':status==='FAIL'?'var(--red)':'var(--yellow)';
+    lines.push('<div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid var(--border);">'
+      +'<span style="font-family:var(--mono);font-size:10px;color:var(--text2);width:220px;flex-shrink:0;">'+label+'</span>'
+      +'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:'+col+';width:40px;flex-shrink:0;">'+status+'</span>'
+      +'<span style="font-family:var(--mono);font-size:10px;color:var(--text3);">'+detail+'</span>'
+      +'</div>');
+    d.innerHTML = '<div style="padding:12px;">'
+      +'<div style="font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:10px;letter-spacing:.1em;">🔬 DIAGNOSTICS</div>'
+      + lines.join('') + '</div>';
+  };
+
+  // Test 1: Finnhub
+  try {
+    var t1 = await fhGet('/quote?symbol=AAPL');
+    add('Finnhub /quote AAPL', 'OK', 'price=$'+t1.c+' key='+FH_KEY.substring(0,6)+'…');
+  } catch(e) { add('Finnhub /quote AAPL', 'FAIL', e.message); }
+
+  // Test 2: FMP grades-summary
+  if(FMP_KEY) {
+    try {
+      var t2 = await fetch('https://financialmodelingprep.com/api/v3/grades-summary/AAPL?apikey='+FMP_KEY);
+      var d2 = await t2.json();
+      if(d2&&d2['Error Message']) throw new Error(d2['Error Message']);
+      add('FMP /grades-summary AAPL', t2.ok?'OK':'FAIL',
+        t2.ok ? 'strongBuy='+(d2.strongBuy||0)+' buy='+(d2.buy||0)+' hold='+(d2.hold||0) : 'HTTP '+t2.status);
+    } catch(e) { add('FMP /grades-summary AAPL', 'FAIL', e.message); }
+
+    // Test 3: FMP price-target-consensus
+    try {
+      var t3 = await fetch('https://financialmodelingprep.com/api/v3/price-target-consensus?symbol=AAPL&apikey='+FMP_KEY);
+      var d3 = await t3.json();
+      if(d3&&d3['Error Message']) throw new Error(d3['Error Message']);
+      var pt = Array.isArray(d3)?d3[0]:d3;
+      add('FMP /price-target-consensus AAPL', t3.ok?'OK':'FAIL',
+        t3.ok ? 'mean=$'+(pt&&pt.targetMean?pt.targetMean.toFixed(2):'N/A') : 'HTTP '+t3.status);
+    } catch(e) { add('FMP /price-target-consensus AAPL', 'FAIL', e.message); }
+
+    // Test 4: FMP earning_calendar
+    try {
+      var t4 = await fetch('https://financialmodelingprep.com/api/v3/earning_calendar?symbol=AAPL&apikey='+FMP_KEY);
+      var d4 = await t4.json();
+      if(d4&&d4['Error Message']) throw new Error(d4['Error Message']);
+      add('FMP /earning_calendar AAPL', t4.ok?'OK':'FAIL',
+        t4.ok ? 'records='+(Array.isArray(d4)?d4.length:0) : 'HTTP '+t4.status);
+    } catch(e) { add('FMP /earning_calendar AAPL', 'FAIL', e.message); }
+
+    // Test 5: FMP insider-trading
+    try {
+      var t5 = await fetch('https://financialmodelingprep.com/api/v3/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
+      var d5 = await t5.json();
+      if(d5&&d5['Error Message']) throw new Error(d5['Error Message']);
+      add('FMP /insider-trading AAPL', t5.ok?'OK':'FAIL',
+        t5.ok ? 'records='+(Array.isArray(d5)?d5.length:0) : 'HTTP '+t5.status);
+    } catch(e) { add('FMP /insider-trading AAPL', 'FAIL', e.message); }
+  } else {
+    add('FMP', 'SKIP', 'No FMP key saved');
+  }
+
+  // Test 6: Twelve Data candles
+  if(TD_KEY) {
+    try {
+      var t6 = await fetch('https://api.twelvedata.com/time_series?symbol=AAPL&interval=1day&outputsize=5&format=JSON&apikey='+TD_KEY);
+      var d6 = await t6.json();
+      if(d6.status==='error') throw new Error(d6.message);
+      add('TwelveData /time_series AAPL', 'OK', 'values='+(d6.values?d6.values.length:0));
+    } catch(e) { add('TwelveData /time_series AAPL', 'FAIL', e.message); }
+  } else {
+    add('TwelveData', 'SKIP', 'No TD key saved');
+  }
+
+  // Test 7: Yahoo via allorigins
+  try {
+    var end=Math.floor(Date.now()/1000), start=end-10*86400;
+    var yUrl='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start+'&period2='+end;
+    var t7 = await fetchWithTimeout('https://api.allorigins.win/get?url='+encodeURIComponent(yUrl), 9000);
+    var w7 = await t7.json();
+    var p7 = w7.contents ? JSON.parse(w7.contents) : null;
+    var ok7 = p7&&p7.chart&&p7.chart.result&&p7.chart.result[0];
+    add('Yahoo via allorigins AAPL', ok7?'OK':'FAIL', ok7?'closes='+p7.chart.result[0].indicators.quote[0].close.length:'no result');
+  } catch(e) { add('Yahoo via allorigins AAPL', 'FAIL', e.message); }
+
+  // Test 8: Yahoo via corsproxy
+  try {
+    var end2=Math.floor(Date.now()/1000), start2=end2-10*86400;
+    var yUrl2='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start2+'&period2='+end2;
+    var t8 = await fetchWithTimeout('https://corsproxy.io/?url='+encodeURIComponent(yUrl2), 9000);
+    var w8 = await t8.json();
+    var ok8 = w8&&w8.chart&&w8.chart.result&&w8.chart.result[0];
+    add('Yahoo via corsproxy AAPL', ok8?'OK':'FAIL', ok8?'closes='+w8.chart.result[0].indicators.quote[0].close.length:'HTTP '+t8.status);
+  } catch(e) { add('Yahoo via corsproxy AAPL', 'FAIL', e.message); }
+
+  // Test 9: Yahoo via thingproxy
+  try {
+    var end3=Math.floor(Date.now()/1000), start3=end3-10*86400;
+    var yUrl3='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start3+'&period2='+end3;
+    var t9 = await fetchWithTimeout('https://thingproxy.freeboard.io/fetch/'+yUrl3, 9000);
+    var w9 = await t9.json();
+    var ok9 = w9&&w9.chart&&w9.chart.result&&w9.chart.result[0];
+    add('Yahoo via thingproxy AAPL', ok9?'OK':'FAIL', ok9?'closes='+w9.chart.result[0].indicators.quote[0].close.length:'HTTP '+t9.status);
+  } catch(e) { add('Yahoo via thingproxy AAPL', 'FAIL', e.message); }
+
+  add('─── Complete ───', '✓', 'Share these results to diagnose issues');
 }
 
 function openGL(){
