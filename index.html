@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.18 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.19 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -229,6 +229,17 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   <input type="text" class="tinput" id="tinput" placeholder="Add ticker…" maxlength="6" onkeydown="if(event.key==='Enter')addTicker()"/>
   <button class="btn-add" onclick="addTicker()">+ Add</button>
   <button class="btn-add" onclick="bulkImport()" style="background:rgba(124,77,255,.1);border-color:var(--purple);color:var(--purple);">⊕ Bulk Import</button>
+</div>
+
+<div id="bulkPanel" style="display:none;margin:0 20px 10px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;">
+  <div style="font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;">⊕ Bulk Import Tickers</div>
+  <textarea id="bulkInput" placeholder="Paste comma-separated tickers: AAPL, AMD, NVDA, MSFT, ORCL…" 
+    style="width:100%;height:60px;background:var(--bg);border:1px solid var(--border2);color:var(--text);
+    font-family:var(--mono);font-size:12px;padding:8px;border-radius:4px;resize:none;outline:none;"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button onclick="bulkImportConfirm()" class="btn-add" style="background:rgba(124,77,255,.15);border-color:var(--purple);color:var(--purple);">✓ Add All Tickers</button>
+    <button onclick="document.getElementById('bulkPanel').style.display='none'" class="btn-add" style="background:transparent;border-color:var(--border2);color:var(--text3);">Cancel</button>
+  </div>
 </div>
 
 <div class="legend">
@@ -752,11 +763,15 @@ function setDot(id, state, label) {
 
 // ── WATCHLIST ─────────────────────────────────────────
 function bulkImport() {
-  var input = prompt('Paste comma-separated tickers:
-(e.g. AAPL, AMD, NVDA, MSFT)');
-  if(!input) return;
-  var tickers = input.toUpperCase()
-    .split(/[\s,;]+/)
+  var panel = document.getElementById('bulkPanel');
+  panel.style.display = panel.style.display==='none'||!panel.style.display ? 'block' : 'none';
+}
+
+function bulkImportConfirm() {
+  var val = document.getElementById('bulkInput').value;
+  if(!val.trim()) return;
+  var tickers = val.toUpperCase()
+    .split(/[,\s;]+/)
     .map(t=>t.replace(/[^A-Z\.]/g,''))
     .filter(t=>t.length>0&&t.length<=6);
   var added = [];
@@ -766,14 +781,13 @@ function bulkImport() {
       added.push(t);
     }
   });
+  document.getElementById('bulkPanel').style.display='none';
+  document.getElementById('bulkInput').value='';
   if(added.length) {
     save();
     renderChips();
     renderTable();
     if(FH_KEY) refreshAll();
-    alert('✓ Added '+added.length+' tickers: '+added.join(', '));
-  } else {
-    alert('No new tickers to add — all already in watchlist.');
   }
 }
 
