@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.22 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.23 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -497,16 +497,18 @@ async function fmpFundamentals(ticker) {
   try {
 
   // Call 1: Grades summary
-  var gradesSummary = await fmpGet('/grades-summary?symbol='+ticker).catch(e=>{
+  // Try upgrades-downgrades-consensus (current stable endpoint for analyst grades)
+  var gradesSummary = await fmpGet('/upgrades-downgrades-consensus?symbol='+ticker).catch(e=>{
     if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) throw e;
     return null;
   });
   await fmpDelay();
 
-  // Call 1b: Fallback to historical grades if summary empty
+  // Fallback: try analyst-grades endpoint
   var grades = [];
-  if(!gradesSummary || (!gradesSummary.strongBuy && !gradesSummary.buy && !gradesSummary.hold)) {
-    grades = await fmpGet('/grades?symbol='+ticker+'&limit=10').catch(()=>[]);
+  if(!gradesSummary || (!gradesSummary.strongBuy && !gradesSummary.buy && !gradesSummary.hold
+     && !gradesSummary.strongBuy && !(Array.isArray(gradesSummary)&&gradesSummary.length))) {
+    grades = await fmpGet('/upgrades-downgrades?symbol='+ticker+'&limit=10').catch(()=>[]);
     await fmpDelay();
   }
 
@@ -519,7 +521,7 @@ async function fmpFundamentals(ticker) {
   await fmpDelay();
 
   // Call 4: Insider trading
-  var insiderData = await fmpGet('/api/v4/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
+  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
 
   // Price target from consensus endpoint
   var ptResult = {};
@@ -540,26 +542,27 @@ async function fmpFundamentals(ticker) {
   // Normalize analyst grades to recTrend format
   var recTrend = [];
   try {
-    if(gradesSummary && (gradesSummary.strongBuy||gradesSummary.buy||gradesSummary.hold||gradesSummary.sell||gradesSummary.strongSell)) {
-      // grades-summary returns direct counts
+    // Handle array response (upgrades-downgrades-consensus may return array)
+    var gs = Array.isArray(gradesSummary) ? gradesSummary[0] : gradesSummary;
+    if(gs && (gs.strongBuy||gs.buy||gs.hold||gs.sell||gs.strongSell)) {
       recTrend = [{
-        strongBuy: gradesSummary.strongBuy||0,
-        buy: gradesSummary.buy||0,
-        hold: gradesSummary.hold||0,
-        sell: gradesSummary.sell||0,
-        strongSell: gradesSummary.strongSell||0
+        strongBuy: gs.strongBuy||0,
+        buy: gs.buy||0,
+        hold: gs.hold||0,
+        sell: gs.sell||0,
+        strongSell: gs.strongSell||0
       }];
     } else if(grades && grades.length) {
-      // /grade/ returns array of individual grade actions — count recent ones
+      // /upgrades-downgrades returns array of {newGrade, gradingCompany, action}
       var sb=0,b=0,h=0,s=0,ss=0;
       grades.slice(0,10).forEach(g=>{
-        var act=(g.newGrade||g.action||'').toLowerCase();
-        if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')) sb++;
-        else if(act.includes('buy')||act.includes('positive')) b++;
-        else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')) h++;
+        var act=(g.newGrade||g.action||g.rating||'').toLowerCase();
+        if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')||act.includes('top pick')) sb++;
+        else if(act.includes('buy')||act.includes('positive')||act.includes('accumulate')) b++;
+        else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')||act.includes('equal')) h++;
         else if(act.includes('strong sell')||act.includes('underperform')||act.includes('underweight')) ss++;
-        else if(act.includes('sell')||act.includes('negative')||act.includes('reduce')) s++;
-        else h++; // default unknown to hold
+        else if(act.includes('sell')||act.includes('negative')||act.includes('reduce')||act.includes('trim')) s++;
+        else h++;
       });
       if(sb+b+h+s+ss>0) recTrend=[{strongBuy:sb,buy:b,hold:h,sell:s,strongSell:ss}];
     }
@@ -1528,10 +1531,13 @@ function nuclearReset(){
   var savedFMP = localStorage.getItem('wi_fmp')||'';
   var savedUW  = localStorage.getItem('wi_uw')||'';
   var savedList= localStorage.getItem('wi_list')||'[]';
-  // Clear ONLY cache keys
-  Object.keys(localStorage).forEach(k=>{
-    if(k.startsWith('cd_')||k.startsWith('fmp_')) localStorage.removeItem(k);
+  // Clear ALL cache keys — comprehensive sweep
+  var toRemove = Object.keys(localStorage).filter(k=>{
+    if(k==='wi_fh'||k==='wi_td'||k==='wi_fmp'||k==='wi_uw'||k==='wi_list') return false;
+    return true; // remove everything else
   });
+  toRemove.forEach(k=>localStorage.removeItem(k));
+  console.log('Nuclear reset cleared', toRemove.length, 'cache keys');
   // Restore keys and list immediately
   if(savedFH)   localStorage.setItem('wi_fh',   savedFH);
   if(savedTD)   localStorage.setItem('wi_td',   savedTD);
@@ -1579,13 +1585,13 @@ async function runDiagnostics() {
   // Test 2: FMP grades-summary
   if(FMP_KEY) {
     try {
-      var t2 = await fetch('https://financialmodelingprep.com/stable/grades-summary?symbol=AAPL&apikey='+FMP_KEY);
+      var t2 = await fetch('https://financialmodelingprep.com/stable/upgrades-downgrades-consensus?symbol=AAPL&apikey='+FMP_KEY);
       var d2 = await t2.json();
       if(d2&&d2['Error Message']) throw new Error(d2['Error Message']);
       var g2 = Array.isArray(d2)?d2[0]:d2;
-      add('FMP /stable/grades-summary AAPL', t2.ok?'OK':'FAIL',
-        t2.ok ? 'strongBuy='+(g2&&g2.strongBuy||0)+' buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0) : 'HTTP '+t2.status);
-    } catch(e) { add('FMP /stable/grades-summary AAPL', 'FAIL', e.message); }
+      add('FMP /stable/upgrades-downgrades-consensus AAPL', t2.ok?'OK':'FAIL',
+        t2.ok ? 'strongBuy='+(g2&&g2.strongBuy||0)+' buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0)+' data='+JSON.stringify(g2).substring(0,60) : 'HTTP '+t2.status);
+    } catch(e) { add('FMP /stable/upgrades-downgrades-consensus AAPL', 'FAIL', e.message); }
 
     // Test 3: FMP price-target-summary
     try {
@@ -1608,12 +1614,12 @@ async function runDiagnostics() {
 
     // Test 5: FMP insider-trading (v4)
     try {
-      var t5 = await fetch('https://financialmodelingprep.com/api/v4/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
+      var t5 = await fetch('https://financialmodelingprep.com/stable/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
       var d5 = await t5.json();
       if(d5&&d5['Error Message']) throw new Error(d5['Error Message']);
-      add('FMP /api/v4/insider-trading AAPL', t5.ok?'OK':'FAIL',
+      add('FMP /stable/insider-trading AAPL', t5.ok?'OK':'FAIL',
         t5.ok ? 'records='+(Array.isArray(d5)?d5.length:0) : 'HTTP '+t5.status);
-    } catch(e) { add('FMP /api/v4/insider-trading AAPL', 'FAIL', e.message); }
+    } catch(e) { add('FMP /stable/insider-trading AAPL', 'FAIL', e.message); }
   } else {
     add('FMP', 'SKIP', 'No FMP key saved');
   }
