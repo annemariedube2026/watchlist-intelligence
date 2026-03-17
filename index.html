@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.23 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.24 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -420,9 +420,12 @@ async function yahooCandles(ticker) {
 
 // ── CANDLE CACHE: store real candles for 8 hours ────────
 var CANDLE_TTL = 8*60*60*1000;
+var CANDLE_VER = 'v2'; // bump this to invalidate all cached candles
 function saveCandleCache(ticker, candles) {
   try {
-    localStorage.setItem('cd_'+ticker, JSON.stringify({data:candles, ts:Date.now()}));
+    localStorage.setItem('cd_'+ticker, JSON.stringify({
+      data:candles, ts:Date.now(), ver:CANDLE_VER
+    }));
   } catch(e) {}
 }
 function loadCandleCache(ticker) {
@@ -430,8 +433,9 @@ function loadCandleCache(ticker) {
     var raw = localStorage.getItem('cd_'+ticker);
     if(!raw) return null;
     var obj = JSON.parse(raw);
+    // Reject if wrong version, expired, or synthetic
+    if(obj.ver !== CANDLE_VER) return null;
     if(Date.now()-obj.ts > CANDLE_TTL) return null;
-    // Only return cached if it was real data (not synthetic)
     if(obj.data && obj.data.s !== 'fallback') return obj.data;
   } catch(e) {}
   return null;
@@ -512,16 +516,21 @@ async function fmpFundamentals(ticker) {
     await fmpDelay();
   }
 
-  // Call 2: Price target consensus — dedicated endpoint, more reliable than estimates
-  var ptConsensus = await fmpGet('/price-target-summary?symbol='+ticker).catch(()=>null);
-  await fmpDelay();
-
-  // Call 3: Earnings surprises — gives us next date + beat/miss history
+  // Call 2: Earnings calendar (most actionable data point)
   var earningsData = await fmpGet('/earnings-calendar?symbol='+ticker).catch(()=>[]);
   await fmpDelay();
 
-  // Call 4: Insider trading
-  var insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=15').catch(()=>[]);
+  // Calls 3+4 reduced to save daily budget — price target + insider now only fetched
+  // if we have remaining budget (indicated by no limit flag)
+  var limitToday = localStorage.getItem('fmp_limit_'+new Date().toDateString());
+  var ptConsensus = null;
+  var insiderData = [];
+  if(!limitToday) {
+    ptConsensus = await fmpGet('/price-target-summary?symbol='+ticker).catch(()=>null);
+    await fmpDelay();
+    insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=10').catch(()=>[]);
+    await fmpDelay();
+  }
 
   // Price target from consensus endpoint
   var ptResult = {};
@@ -599,6 +608,10 @@ async function fmpFundamentals(ticker) {
     // If rate limited, flag it so subsequent tickers skip FMP calls today
     if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) {
       try { localStorage.setItem('fmp_limit_'+new Date().toDateString(),'1'); } catch(ex){}
+      // Show warning in status bar
+      var el=document.getElementById('lupd');
+      if(el&&!el.textContent.includes('FMP limit'))
+        el.textContent='⚠ FMP daily limit reached — analyst/earnings/insider unavailable until midnight UTC';
     }
     return empty;
   }
@@ -1039,6 +1052,10 @@ function scores(ticker){
       h52:h52?h52.toFixed(2):'N/A',l52:l52?l52.toFixed(2):'N/A',
       r52:Math.round(r52),d20:d20pct,d20score:Math.round(d20score),candles:closes.length,
       candleSrc:c.s||'unknown',price,pc:q.pc||0,sectorPE,industry:industry||'Unknown',
+      candleFirst:closes.length?closes[0].toFixed(2):'N/A',
+      candleLast:closes.length?closes[closes.length-1].toFixed(2):'N/A',
+      candleMin:closes.length?Math.min(...closes).toFixed(2):'N/A',
+      candleMax:closes.length?Math.max(...closes).toFixed(2):'N/A',
       ptMean:d.priceTarget&&d.priceTarget.targetMean?d.priceTarget.targetMean.toFixed(2):'N/A',
       ptHigh:d.priceTarget&&d.priceTarget.targetHigh?d.priceTarget.targetHigh.toFixed(2):'N/A',
       ptLow:d.priceTarget&&d.priceTarget.targetLow?d.priceTarget.targetLow.toFixed(2):'N/A',
@@ -1322,7 +1339,11 @@ function renderSection(ticker){
         <div class="audit-grid">
           ${aitem('Last Price','$'+s.raw.price,'Finnhub /quote → c','context')}
           ${aitem('Prev Close','$'+s.raw.pc,'Finnhub /quote → pc','context')}
-          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)',candleSrc==='fallback'?'⚠ Synthetic estimated — momentum less reliable':'✓ Real price history — scores reliable',candleSrc==='fallback'?'exhaust':'analyst')}
+          ${aitem('Candle Source',s.raw.candleSrc+' ('+s.raw.candles+'d)',
+            (candleSrc==='fallback'?'⚠ Synthetic — momentum less reliable':'✓ Real price history')
+            +' | First: $'+s.raw.candleFirst+' Last: $'+s.raw.candleLast
+            +' | Min: $'+s.raw.candleMin+' Max: $'+s.raw.candleMax,
+            candleSrc==='fallback'?'exhaust':'analyst')}
           <div class="aitem" style="background:var(--bg3);border-color:var(--border);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
               <div class="albl" style="color:${rc};">RSI (14)</div>
@@ -1524,30 +1545,27 @@ function closeDiagnostics(){
 }
 
 function nuclearReset(){
-  // Skip confirm dialog (Edge blocks it) — just proceed
-  // Explicitly save the keys and list BEFORE clearing anything
-  var savedFH  = localStorage.getItem('wi_fh')||'';
-  var savedTD  = localStorage.getItem('wi_td')||'';
-  var savedFMP = localStorage.getItem('wi_fmp')||'';
-  var savedUW  = localStorage.getItem('wi_uw')||'';
-  var savedList= localStorage.getItem('wi_list')||'[]';
-  // Clear ALL cache keys — comprehensive sweep
-  var toRemove = Object.keys(localStorage).filter(k=>{
-    if(k==='wi_fh'||k==='wi_td'||k==='wi_fmp'||k==='wi_uw'||k==='wi_list') return false;
-    return true; // remove everything else
-  });
-  toRemove.forEach(k=>localStorage.removeItem(k));
-  console.log('Nuclear reset cleared', toRemove.length, 'cache keys');
-  // Restore keys and list immediately
-  if(savedFH)   localStorage.setItem('wi_fh',   savedFH);
-  if(savedTD)   localStorage.setItem('wi_td',   savedTD);
-  if(savedFMP)  localStorage.setItem('wi_fmp',  savedFMP);
-  if(savedUW)   localStorage.setItem('wi_uw',   savedUW);
-  localStorage.setItem('wi_list', savedList);
-  // Reset in-memory data and reload
+  // Save the 5 keys we must preserve
+  var keep = {
+    'wi_fh':  localStorage.getItem('wi_fh')||'',
+    'wi_td':  localStorage.getItem('wi_td')||'',
+    'wi_fmp': localStorage.getItem('wi_fmp')||'',
+    'wi_uw':  localStorage.getItem('wi_uw')||'',
+    'wi_list':localStorage.getItem('wi_list')||'[]'
+  };
+  // Nuke ALL localStorage — including FMP daily limit flags
+  localStorage.clear();
+  // Restore only the 5 preserved keys
+  Object.keys(keep).forEach(k=>{ if(keep[k]) localStorage.setItem(k, keep[k]); });
+  // Verify clear worked — show in status bar
+  var remaining = Object.keys(localStorage).length;
+  document.getElementById('lupd').textContent =
+    'Hard Reset: cleared all cache ('+remaining+' keys kept). Loading fresh data…';
+  // Reset ALL in-memory state
   DATA={};
-  FH_KEY=savedFH; TD_KEY=savedTD; FMP_KEY=savedFMP; UW_KEY=savedUW;
-  WATCHLIST=JSON.parse(savedList);
+  FH_KEY=keep['wi_fh']; TD_KEY=keep['wi_td'];
+  FMP_KEY=keep['wi_fmp']; UW_KEY=keep['wi_uw'];
+  WATCHLIST=JSON.parse(keep['wi_list']);
   renderChips();
   renderTable();
   if(FH_KEY) refreshAll();
