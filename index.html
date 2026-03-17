@@ -179,7 +179,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.24 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.25 · Multi-Source · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -855,10 +855,13 @@ async function refreshAll() {
   // Batch of 3, 2.5s gap — stays well under Finnhub 60 calls/min free limit
   // 3 tickers × 3 FH calls = 9 calls per batch, 2.5s apart = ~216 calls/min max but
   // realistically ~22 calls/30s which is safe
-  // Batch of 2 with 3s gap — FMP has internal 350ms delays per call (4 calls = ~1.4s)
-  // so 2 tickers in parallel = ~1.4s of FMP calls, then 3s gap = well under 5/min limit
-  // Finnhub: 2 tickers × 3 calls = 6 calls per batch, well under 60/min
-  var BATCH=2;
+  // Batch of 3 with 8s gap:
+  // - TD: 3 calls per batch, 8s gap = 22.5 calls/min (under 8/min? No — but TD counts per minute
+  //   from first call, so 3 calls then 8s wait = ~22/min peak but averages to ~11/min)
+  // - Actually safest: batch 2, 9s gap = 2 calls per 9s = 13/min, still risks hitting 8/min
+  // - Best: batch 1, 8s gap = 7.5 calls/min, safely under TD 8/min limit
+  // Trade-off: 60 tickers × 8s = 8 minutes total. Acceptable for reliable green dots.
+  var BATCH=1;
   var loaded=0;
   for(var i=0;i<toLoad.length;i+=BATCH) {
     var batch=toLoad.slice(i,i+BATCH);
@@ -866,7 +869,7 @@ async function refreshAll() {
     if(prog) prog.textContent=loaded+'/'+toLoad.length+' loaded…';
     await Promise.all(batch.map(t=>loadTickerWithRetry(t)));
     renderTable();
-    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,3000));
+    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,8000));
   }
 
   btn.classList.remove('spinning');
@@ -1684,6 +1687,25 @@ async function runDiagnostics() {
     var ok9 = w9&&w9.chart&&w9.chart.result&&w9.chart.result[0];
     add('Yahoo via thingproxy AAPL', ok9?'OK':'FAIL', ok9?'closes='+w9.chart.result[0].indicators.quote[0].close.length:'HTTP '+t9.status);
   } catch(e) { add('Yahoo via thingproxy AAPL', 'FAIL', e.message); }
+
+  // Test 10: ORCL candles specifically — check what TD actually returns
+  if(TD_KEY) {
+    try {
+      var end10 = new Date().toISOString().split('T')[0];
+      var start10 = new Date(Date.now()-20*86400000).toISOString().split('T')[0];
+      var t10 = await fetch('https://api.twelvedata.com/time_series?symbol=ORCL&interval=1day&outputsize=20&format=JSON&apikey='+TD_KEY);
+      var d10 = await t10.json();
+      if(d10.status==='error') throw new Error(d10.message);
+      var vals10 = d10.values||[];
+      var closes10 = vals10.slice().reverse().map(v=>parseFloat(v.close));
+      // Calculate RSI on the spot
+      var rsi10 = closes10.length>=16 ? calcRSI(closes10, 14) : 'need more data';
+      var lastClose = closes10.length ? closes10[closes10.length-1].toFixed(2) : 'N/A';
+      add('ORCL TD candles + RSI check', 'OK',
+        'bars='+vals10.length+' lastClose=$'+lastClose+' RSI(14)='+rsi10+
+        ' first='+closes10[0]?.toFixed(2)+' last='+closes10[closes10.length-1]?.toFixed(2));
+    } catch(e) { add('ORCL TD candles + RSI check', 'FAIL', e.message); }
+  }
 
   add('─── Complete ───', '✓', 'Share these results to diagnose issues');
 }
