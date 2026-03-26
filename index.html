@@ -169,6 +169,13 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 .empty h3{font-family:var(--mono);font-size:13px;letter-spacing:.1em;color:var(--text2);margin-bottom:6px;}
 .empty p{font-size:12px;color:var(--text3);}
 
+/* ANALYST SOURCE BADGE */
+.src-fmp{display:inline-flex;background:rgba(0,230,118,.07);border:1px solid rgba(0,230,118,.2);color:var(--green);
+  font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.06em;}
+.src-yahoo{display:inline-flex;background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);color:var(--accent);
+  font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.06em;}
+.src-both{display:inline-flex;background:rgba(124,77,255,.09);border:1px solid rgba(124,77,255,.28);color:var(--purple);
+  font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.06em;}
 </style>
 </head>
 <body>
@@ -179,13 +186,14 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.25 · Multi-Source · GitHub Pages</div>
+      <div class="logo-sub">v6.26 · Multi-Source · Yahoo Analyst · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
     <div class="api-pill"><div class="dot" id="fhDot"></div><span id="fhTxt">Finnhub</span></div>
     <div class="api-pill"><div class="dot" id="tdDot"></div><span id="tdTxt">TwelveData</span></div>
     <div class="api-pill"><div class="dot" id="fmpDot"></div><span id="fmpTxt">FMP</span></div>
+    <div class="api-pill"><div class="dot" id="yhaDot"></div><span id="yhaTxt">YH Analyst</span></div>
     <div class="api-pill"><div class="dot" id="uwDot"></div><span>UW: Pending</span></div>
     <button class="btn-gl" onclick="openGL()">📖 Glossary</button>
     <button class="btn-gl" onclick="openSettings()" title="Add or update API keys">⚙️ Settings</button>
@@ -221,6 +229,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <a href="https://twelvedata.com" target="_blank">twelvedata.com</a> &nbsp;·&nbsp;
     <a href="https://financialmodelingprep.com" target="_blank">financialmodelingprep.com</a>
     &nbsp;— all free, no credit card. Keys stored only in your browser.
+    <br>🆕 <strong>v6.26:</strong> Yahoo Finance analyst targets now auto-fetched (no key needed) — fills gaps when FMP is rate-limited.
   </div>
 </div>
 
@@ -234,7 +243,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 
 <div id="bulkPanel" style="display:none;margin:0 20px 10px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;">
   <div style="font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;">⊕ Bulk Import Tickers</div>
-  <textarea id="bulkInput" placeholder="Paste comma-separated tickers: AAPL, AMD, NVDA, MSFT, ORCL…" 
+  <textarea id="bulkInput" placeholder="Paste comma-separated tickers: AAPL, AMD, NVDA, MSFT, ORCL…"
     style="width:100%;height:60px;background:var(--bg);border:1px solid var(--border2);color:var(--text);
     font-family:var(--mono);font-size:12px;padding:8px;border-radius:4px;resize:none;outline:none;"></textarea>
   <div style="display:flex;gap:8px;margin-top:8px;">
@@ -244,10 +253,11 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 </div>
 
 <div class="legend">
-  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);margin-right:3px;vertical-align:middle;"></span>Green dot = Real candle data — TwelveData or Yahoo (scores reliable)</span>
-  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 4px var(--red);margin-right:3px;vertical-align:middle;"></span>Red dot = Synthetic estimated data (momentum scores less reliable)</span>
+  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green);margin-right:3px;vertical-align:middle;"></span>Green dot = Real candle data (scores reliable)</span>
+  <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 4px var(--red);margin-right:3px;vertical-align:middle;"></span>Red dot = Synthetic estimated data (momentum less reliable)</span>
   <span style="color:var(--yellow);">⚠ Earnings within 14 days</span>
   <span style="color:var(--red);">⚠ Earnings within 7 days</span>
+  <span style="color:var(--accent);">🆕 Analyst: FMP + Yahoo Finance auto-merged</span>
 </div>
 
 <div class="rbar">
@@ -303,7 +313,14 @@ var FH_KEY='', TD_KEY='', FMP_KEY='', UW_KEY='';
 var WATCHLIST=[], DATA={}, EXPAND={};
 var SORT_COL='', SORT_DIR=1;
 var FMP_CACHE={}, FMP_CACHE_TS={};
-var FMP_CACHE_TTL = 24*60*60*1000; // 24 hours — analyst/insider data changes slowly
+var FMP_CACHE_TTL = 24*60*60*1000;
+
+// ── TIMEOUT HELPER ────────────────────────────────────
+function fetchWithTimeout(url, ms) {
+  var controller = new AbortController();
+  var timer = setTimeout(()=>controller.abort(), ms);
+  return fetch(url, {signal:controller.signal}).finally(()=>clearTimeout(timer));
+}
 
 // ── API HELPERS ────────────────────────────────────────
 async function fhGet(path) {
@@ -325,14 +342,11 @@ async function tdGet(path) {
 }
 
 async function fmpGet(path) {
-  // FMP migrated from /api/v3 to /stable in 2025
-  // v4 paths stay as /api/v4, everything else uses /stable
   var sep = path.indexOf('?')>=0 ? '&' : '?';
-  var base = path.startsWith('/api/v4') 
+  var base = path.startsWith('/api/v4')
     ? 'https://financialmodelingprep.com'
     : 'https://financialmodelingprep.com/stable';
-  var fullPath = path.startsWith('/api/v4') ? path : path;
-  var r = await fetch(base+fullPath+sep+'apikey='+FMP_KEY);
+  var r = await fetch(base+path+sep+'apikey='+FMP_KEY);
   if(!r.ok) throw new Error('FMP HTTP '+r.status);
   var d = await r.json();
   if(d&&d['Error Message']) throw new Error('FMP: '+d['Error Message']);
@@ -340,8 +354,7 @@ async function fmpGet(path) {
   return d;
 }
 
-
-// ── TWELVE DATA: candles + pre-built indicators ────────
+// ── TWELVE DATA: candles ───────────────────────────────
 async function tdCandles(ticker) {
   if(!TD_KEY) throw new Error('No Twelve Data key');
   var data = await tdGet('/time_series?symbol='+ticker+'&interval=1day&outputsize=90&format=JSON');
@@ -352,15 +365,7 @@ async function tdCandles(ticker) {
   return {c:closes, v:vols, s:'twelvedata'};
 }
 
-// ── YAHOO FINANCE candle fallback (90d via CORS proxy) ─
-// ── TIMEOUT HELPER (AbortSignal.timeout not in all browsers) ──
-function fetchWithTimeout(url, ms) {
-  var controller = new AbortController();
-  var timer = setTimeout(()=>controller.abort(), ms);
-  return fetch(url, {signal:controller.signal}).finally(()=>clearTimeout(timer));
-}
-
-// ── PARSE YAHOO CHART RESPONSE ────────────────────────
+// ── YAHOO FINANCE candle fallback ──────────────────────
 function parseYahooChart(data) {
   try {
     var result = data.chart&&data.chart.result&&data.chart.result[0];
@@ -378,25 +383,20 @@ function parseYahooChart(data) {
 
 async function yahooCandles(ticker) {
   var end = Math.floor(Date.now()/1000);
-  var start = end - 95*24*60*60; // 95 days to ensure 90 trading days
+  var start = end - 95*24*60*60;
   var yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker
     +'?interval=1d&period1='+start+'&period2='+end;
-
-  // Also try query2 as Yahoo sometimes routes differently
   var yahooUrl2 = 'https://query2.finance.yahoo.com/v8/finance/chart/'+ticker
     +'?interval=1d&period1='+start+'&period2='+end;
-
-  // Three proxy strategies — 5s timeout each = max 15s for Yahoo cascade
   var attempts = [
     {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl), wrap:'allorigins'},
     {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl2), wrap:'allorigins'},
     {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl), wrap:'direct'},
   ];
-
   for(var i=0;i<attempts.length;i++) {
     try {
       var r = await fetchWithTimeout(attempts[i].url, 5000);
-      if(!r.ok) { console.warn('Yahoo proxy '+i+' HTTP '+r.status); continue; }
+      if(!r.ok) continue;
       var wrapper = await r.json();
       var data;
       if(attempts[i].wrap==='allorigins') {
@@ -406,219 +406,315 @@ async function yahooCandles(ticker) {
         data = wrapper;
       }
       var parsed = parseYahooChart(data);
-      if(parsed) {
-        console.log(ticker+' Yahoo OK via proxy '+i+' ('+parsed.c.length+'d)');
-        return parsed;
+      if(parsed) return parsed;
+    } catch(e) { continue; }
+  }
+  throw new Error('Yahoo candles: all proxies failed for '+ticker);
+}
+
+// ── YAHOO ANALYST: quoteSummary ────────────────────────
+// Free — no API key needed. Uses same CORS proxies as candles.
+// Returns: { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' }
+// recMean scale: 1=Strong Buy, 2=Buy, 3=Hold, 4=Sell, 5=Strong Sell
+async function yahooAnalyst(ticker) {
+  var modules = 'financialData,recommendationTrend';
+  var yahooUrl  = 'https://query1.finance.yahoo.com/v11/finance/quoteSummary/'+ticker+'?modules='+modules;
+  var yahooUrl2 = 'https://query2.finance.yahoo.com/v11/finance/quoteSummary/'+ticker+'?modules='+modules;
+  var attempts = [
+    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl),  wrap:'allorigins'},
+    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl2), wrap:'allorigins'},
+    {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl),            wrap:'direct'},
+  ];
+  for (var i=0; i<attempts.length; i++) {
+    try {
+      var r = await fetchWithTimeout(attempts[i].url, 6000);
+      if (!r.ok) continue;
+      var wrapper = await r.json();
+      var data;
+      if (attempts[i].wrap === 'allorigins') {
+        if (!wrapper.contents) continue;
+        try { data = JSON.parse(wrapper.contents); } catch(e) { continue; }
+      } else {
+        data = wrapper;
       }
+      var result = data && data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];
+      if (!result) continue;
+
+      var fd = result.financialData || {};
+      var rt = result.recommendationTrend || {};
+
+      var ptMean      = fd.targetMeanPrice      && fd.targetMeanPrice.raw      ? fd.targetMeanPrice.raw      : 0;
+      var ptHigh      = fd.targetHighPrice      && fd.targetHighPrice.raw      ? fd.targetHighPrice.raw      : 0;
+      var ptLow       = fd.targetLowPrice       && fd.targetLowPrice.raw       ? fd.targetLowPrice.raw       : 0;
+      var numAnalysts = fd.numberOfAnalystOpinions && fd.numberOfAnalystOpinions.raw ? fd.numberOfAnalystOpinions.raw : 0;
+      var recMean     = fd.recommendationMean   && fd.recommendationMean.raw   ? fd.recommendationMean.raw   : 0;
+      var recKey      = fd.recommendationKey || '';
+
+      // Most recent month trend counts
+      var trend = {};
+      if (rt.trend && rt.trend.length > 0) {
+        var t0 = rt.trend[0];
+        trend = { strongBuy: t0.strongBuy||0, buy: t0.buy||0, hold: t0.hold||0, sell: t0.sell||0, strongSell: t0.strongSell||0 };
+      }
+
+      if (!ptMean && !recMean) continue;
+
+      // Update header dot
+      var yd=document.getElementById('yhaDot'), yt=document.getElementById('yhaTxt');
+      if(yd){yd.className='dot on';}
+      if(yt) yt.textContent='YH Analyst: Live';
+
+      console.log(ticker+' Yahoo analyst OK: PT=$'+ptMean.toFixed(2)+' rec='+recKey+' n='+numAnalysts);
+      return { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' };
     } catch(e) {
-      console.warn(ticker+' Yahoo proxy '+i+' failed: '+e.message);
+      console.warn(ticker+' Yahoo analyst proxy '+i+' failed: '+e.message);
       continue;
     }
   }
-  throw new Error('Yahoo: all proxies failed for '+ticker);
-}
-
-// ── CANDLE CACHE: store real candles for 8 hours ────────
-var CANDLE_TTL = 8*60*60*1000;
-var CANDLE_VER = 'v2'; // bump this to invalidate all cached candles
-function saveCandleCache(ticker, candles) {
-  try {
-    localStorage.setItem('cd_'+ticker, JSON.stringify({
-      data:candles, ts:Date.now(), ver:CANDLE_VER
-    }));
-  } catch(e) {}
-}
-function loadCandleCache(ticker) {
-  try {
-    var raw = localStorage.getItem('cd_'+ticker);
-    if(!raw) return null;
-    var obj = JSON.parse(raw);
-    // Reject if wrong version, expired, or synthetic
-    if(obj.ver !== CANDLE_VER) return null;
-    if(Date.now()-obj.ts > CANDLE_TTL) return null;
-    if(obj.data && obj.data.s !== 'fallback') return obj.data;
-  } catch(e) {}
   return null;
 }
 
-// ── CANDLE CASCADE: Cache → TD → Yahoo (4 proxies) → Finnhub synthetic ──
-async function getCandles(ticker, quote, metrics) {
-  // 0. Check cache first — if we have real data < 8hrs old, use it
-  var cached = loadCandleCache(ticker);
-  if(cached) {
-    console.log(ticker+' candles from cache ('+cached.s+')');
-    return cached;
+// ── MERGE ANALYST DATA: FMP + Yahoo → best available ──
+// FMP wins for recommendations when available (more granular).
+// Yahoo fills price targets when FMP is missing or rate-limited.
+// Both combined when available for highest confidence.
+function mergeAnalystData(fmpData, yahooData) {
+  var merged = {
+    recTrend:    (fmpData && fmpData.recTrend)    || [],
+    priceTarget: (fmpData && fmpData.priceTarget) || {},
+    source: 'fmp'
+  };
+  if (!yahooData) return merged;
+
+  var fmpHasPT   = merged.priceTarget && merged.priceTarget.targetMean;
+  var yahooHasPT = yahooData.ptMean > 0;
+  var fmpHasRec  = merged.recTrend && merged.recTrend.length > 0;
+
+  // Price target: Yahoo fills when FMP is missing
+  if (!fmpHasPT && yahooHasPT) {
+    merged.priceTarget = {
+      targetMean: yahooData.ptMean,
+      targetHigh: yahooData.ptHigh,
+      targetLow:  yahooData.ptLow,
+      numAnalysts: yahooData.numAnalysts
+    };
+    merged.source = fmpHasRec ? 'both' : 'yahoo';
+  } else if (fmpHasPT && yahooHasPT) {
+    // Both have PT — keep FMP but annotate Yahoo's analyst count
+    merged.priceTarget.numAnalysts = yahooData.numAnalysts;
+    merged.source = 'both';
   }
 
-  // 1. Try Twelve Data first (best quality, pre-cleaned)
-  if(TD_KEY) {
-    try {
-      var td = await tdCandles(ticker);
-      saveCandleCache(ticker, td);
-      return td;
-    } catch(e) {
-      console.warn(ticker+' TD failed: '+e.message+' → trying Yahoo…');
-    }
+  // Recommendations: Yahoo fills when FMP has none
+  if (!fmpHasRec && yahooData.trend && yahooData.trend.strongBuy !== undefined) {
+    merged.recTrend = [yahooData.trend];
+    if (merged.source === 'fmp') merged.source = 'yahoo';
   }
-  // 2. Try Yahoo Finance through 4 different CORS proxies
+
+  // Store Yahoo metadata for audit panel
+  merged.yahooRecKey      = yahooData.recKey;
+  merged.yahooRecMean     = yahooData.recMean;
+  merged.yahooNumAnalysts = yahooData.numAnalysts;
+
+  return merged;
+}
+
+// ── CANDLE CACHE ───────────────────────────────────────
+var CANDLE_TTL = 8*60*60*1000;
+var CANDLE_VER = 'v2';
+function saveCandleCache(ticker, candles) {
+  try { localStorage.setItem('cd_'+ticker, JSON.stringify({data:candles,ts:Date.now(),ver:CANDLE_VER})); } catch(e){}
+}
+function loadCandleCache(ticker) {
   try {
-    var yh = await yahooCandles(ticker);
-    saveCandleCache(ticker, yh);
-    return yh;
-  } catch(e) {
-    console.warn(ticker+' all Yahoo proxies failed → using Finnhub synthetic');
+    var raw=localStorage.getItem('cd_'+ticker); if(!raw) return null;
+    var obj=JSON.parse(raw);
+    if(obj.ver!==CANDLE_VER) return null;
+    if(Date.now()-obj.ts>CANDLE_TTL) return null;
+    if(obj.data&&obj.data.s!=='fallback') return obj.data;
+  } catch(e){}
+  return null;
+}
+
+// ── CANDLE CASCADE ─────────────────────────────────────
+async function getCandles(ticker, quote, metrics) {
+  var cached=loadCandleCache(ticker);
+  if(cached) return cached;
+  if(TD_KEY) {
+    try { var td=await tdCandles(ticker); saveCandleCache(ticker,td); return td; }
+    catch(e) { console.warn(ticker+' TD failed: '+e.message); }
   }
-  // 3. Last resort: Finnhub synthetic (red dot) — NOT cached
+  try { var yh=await yahooCandles(ticker); saveCandleCache(ticker,yh); return yh; }
+  catch(e) { console.warn(ticker+' Yahoo candles failed'); }
   return buildFallback(quote, metrics);
 }
 
-// ── FMP: fundamentals with 24hr cache ─────────────────
-// Strategy: 3 calls per ticker (dropped separate ptRaw — use analyst-estimates instead)
-// Sequential with 300ms gaps to stay under rate limit
-// Cache for 24hrs — analyst/earnings/insider don't change hourly
+// ── FMP FUNDAMENTALS ───────────────────────────────────
 async function fmpFundamentals(ticker) {
-  if(!FMP_KEY) return {recTrend:[], priceTarget:{}, calendar:{earningsCalendar:[]}, insider:{data:[]}};
-  // Quick check — if we already know FMP is rate limited today, skip all calls
-  var limitKey = 'fmp_limit_'+new Date().toDateString();
-  if(localStorage.getItem(limitKey)) return {recTrend:[], priceTarget:{}, calendar:{earningsCalendar:[]}, insider:{data:[]}, _limited:true};
-
-  var cacheKey = 'fmp_'+ticker;
-  var now = Date.now();
-  var TTL_24H = 24*60*60*1000;
-
-  // Check localStorage cache first — 24hr TTL
-  try {
-    var cached = localStorage.getItem(cacheKey);
-    var cachedTs = parseInt(localStorage.getItem(cacheKey+'_ts')||'0');
-    if(cached && now - cachedTs < TTL_24H) {
-      return JSON.parse(cached);
-    }
-  } catch(e) {}
-
-  // Helper: delay between FMP calls to respect ~5 calls/min rate limit
-  var fmpDelay = ()=>new Promise(r=>setTimeout(r,350));
   var empty = {recTrend:[], priceTarget:{}, calendar:{earningsCalendar:[]}, insider:{data:[]}};
-  try {
+  var limitKey='fmp_limit_'+new Date().toDateString();
 
-  // Call 1: Grades summary
-  // Try upgrades-downgrades-consensus (current stable endpoint for analyst grades)
-  var gradesSummary = await fmpGet('/upgrades-downgrades-consensus?symbol='+ticker).catch(e=>{
-    if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) throw e;
-    return null;
-  });
-  await fmpDelay();
+  // Run Yahoo analyst fetch in parallel — always, regardless of FMP status
+  var yahooAnalystPromise = yahooAnalyst(ticker).catch(()=>null);
 
-  // Fallback: try analyst-grades endpoint
-  var grades = [];
-  if(!gradesSummary || (!gradesSummary.strongBuy && !gradesSummary.buy && !gradesSummary.hold
-     && !gradesSummary.strongBuy && !(Array.isArray(gradesSummary)&&gradesSummary.length))) {
-    grades = await fmpGet('/upgrades-downgrades?symbol='+ticker+'&limit=10').catch(()=>[]);
-    await fmpDelay();
+  if(!FMP_KEY||localStorage.getItem(limitKey)) {
+    // No FMP — rely entirely on Yahoo
+    var ya = await yahooAnalystPromise;
+    var merged = mergeAnalystData(empty, ya);
+    return Object.assign(empty, {
+      recTrend: merged.recTrend,
+      priceTarget: merged.priceTarget,
+      _analystSource: merged.source,
+      _yahooRecKey: merged.yahooRecKey,
+      _yahooRecMean: merged.yahooRecMean,
+      _yahooNumAnalysts: merged.yahooNumAnalysts
+    });
   }
 
-  // Call 2: Earnings calendar (most actionable data point)
-  var earningsData = await fmpGet('/earnings-calendar?symbol='+ticker).catch(()=>[]);
-  await fmpDelay();
-
-  // Calls 3+4 reduced to save daily budget — price target + insider now only fetched
-  // if we have remaining budget (indicated by no limit flag)
-  var limitToday = localStorage.getItem('fmp_limit_'+new Date().toDateString());
-  var ptConsensus = null;
-  var insiderData = [];
-  if(!limitToday) {
-    ptConsensus = await fmpGet('/price-target-summary?symbol='+ticker).catch(()=>null);
-    await fmpDelay();
-    insiderData = await fmpGet('/insider-trading?symbol='+ticker+'&limit=10').catch(()=>[]);
-    await fmpDelay();
-  }
-
-  // Price target from consensus endpoint
-  var ptResult = {};
+  var cacheKey='fmp_'+ticker;
+  var now=Date.now();
+  var TTL_24H=24*60*60*1000;
   try {
-    if(ptConsensus) {
-      // /price-target-summary returns {symbol, lastMonth, lastQuarter, lastYear, ...}
-      // or array of {targetHigh, targetLow, targetMean, targetMedian, targetConsensus}
-      var pt = Array.isArray(ptConsensus) ? ptConsensus[0] : ptConsensus;
-      if(pt) {
-        var mean = pt.targetMean||pt.targetConsensus||pt.lastMonth||0;
-        var high = pt.targetHigh||pt.lastMonthHigh||0;
-        var low  = pt.targetLow||pt.lastMonthLow||0;
-        if(mean) ptResult = {targetMean:mean, targetHigh:high, targetLow:low};
+    var cached=localStorage.getItem(cacheKey);
+    var cachedTs=parseInt(localStorage.getItem(cacheKey+'_ts')||'0');
+    if(cached&&now-cachedTs<TTL_24H) {
+      var parsed=JSON.parse(cached);
+      // Still run Yahoo in parallel when using FMP cache — fills any gaps
+      var ya=await yahooAnalystPromise;
+      var merged=mergeAnalystData(parsed, ya);
+      parsed.recTrend=merged.recTrend;
+      parsed.priceTarget=merged.priceTarget;
+      parsed._analystSource=merged.source;
+      parsed._yahooRecKey=merged.yahooRecKey;
+      parsed._yahooRecMean=merged.yahooRecMean;
+      parsed._yahooNumAnalysts=merged.yahooNumAnalysts;
+      return parsed;
+    }
+  } catch(e){}
+
+  var fmpDelay=()=>new Promise(r=>setTimeout(r,350));
+  try {
+    var gradesSummary=await fmpGet('/upgrades-downgrades-consensus?symbol='+ticker).catch(e=>{
+      if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) throw e;
+      return null;
+    });
+    await fmpDelay();
+
+    var grades=[];
+    if(!gradesSummary||(!(gradesSummary.strongBuy)&&!(gradesSummary.buy)&&!(gradesSummary.hold)
+       &&!(Array.isArray(gradesSummary)&&gradesSummary.length))) {
+      grades=await fmpGet('/upgrades-downgrades?symbol='+ticker+'&limit=10').catch(()=>[]);
+      await fmpDelay();
+    }
+
+    var earningsData=await fmpGet('/earnings-calendar?symbol='+ticker).catch(()=>[]);
+    await fmpDelay();
+
+    var limitToday=localStorage.getItem('fmp_limit_'+new Date().toDateString());
+    var ptConsensus=null, insiderData=[];
+    if(!limitToday) {
+      ptConsensus=await fmpGet('/price-target-summary?symbol='+ticker).catch(()=>null);
+      await fmpDelay();
+      insiderData=await fmpGet('/insider-trading?symbol='+ticker+'&limit=10').catch(()=>[]);
+      await fmpDelay();
+    }
+
+    var ptResult={};
+    try {
+      if(ptConsensus) {
+        var pt=Array.isArray(ptConsensus)?ptConsensus[0]:ptConsensus;
+        if(pt) {
+          var mean=pt.targetMean||pt.targetConsensus||pt.lastMonth||0;
+          var high=pt.targetHigh||pt.lastMonthHigh||0;
+          var low=pt.targetLow||pt.lastMonthLow||0;
+          if(mean) ptResult={targetMean:mean,targetHigh:high,targetLow:low};
+        }
       }
+    } catch(e){}
+
+    var recTrend=[];
+    try {
+      var gs=Array.isArray(gradesSummary)?gradesSummary[0]:gradesSummary;
+      if(gs&&(gs.strongBuy||gs.buy||gs.hold||gs.sell||gs.strongSell)) {
+        recTrend=[{strongBuy:gs.strongBuy||0,buy:gs.buy||0,hold:gs.hold||0,sell:gs.sell||0,strongSell:gs.strongSell||0}];
+      } else if(grades&&grades.length) {
+        var sb=0,b=0,h=0,s=0,ss=0;
+        grades.slice(0,10).forEach(g=>{
+          var act=(g.newGrade||g.action||g.rating||'').toLowerCase();
+          if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')||act.includes('top pick')) sb++;
+          else if(act.includes('buy')||act.includes('positive')||act.includes('accumulate')) b++;
+          else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')||act.includes('equal')) h++;
+          else if(act.includes('strong sell')||act.includes('underperform')||act.includes('underweight')) ss++;
+          else if(act.includes('sell')||act.includes('negative')||act.includes('reduce')||act.includes('trim')) s++;
+          else h++;
+        });
+        if(sb+b+h+s+ss>0) recTrend=[{strongBuy:sb,buy:b,hold:h,sell:s,strongSell:ss}];
+      }
+    } catch(e){}
+
+    var calResult={earningsCalendar:[]};
+    if(earningsData&&earningsData.length) {
+      calResult.earningsCalendar=earningsData.map(e=>({date:e.date,symbol:e.symbol}));
     }
-  } catch(e) {}
 
-  // Normalize analyst grades to recTrend format
-  var recTrend = [];
-  try {
-    // Handle array response (upgrades-downgrades-consensus may return array)
-    var gs = Array.isArray(gradesSummary) ? gradesSummary[0] : gradesSummary;
-    if(gs && (gs.strongBuy||gs.buy||gs.hold||gs.sell||gs.strongSell)) {
-      recTrend = [{
-        strongBuy: gs.strongBuy||0,
-        buy: gs.buy||0,
-        hold: gs.hold||0,
-        sell: gs.sell||0,
-        strongSell: gs.strongSell||0
-      }];
-    } else if(grades && grades.length) {
-      // /upgrades-downgrades returns array of {newGrade, gradingCompany, action}
-      var sb=0,b=0,h=0,s=0,ss=0;
-      grades.slice(0,10).forEach(g=>{
-        var act=(g.newGrade||g.action||g.rating||'').toLowerCase();
-        if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')||act.includes('top pick')) sb++;
-        else if(act.includes('buy')||act.includes('positive')||act.includes('accumulate')) b++;
-        else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')||act.includes('equal')) h++;
-        else if(act.includes('strong sell')||act.includes('underperform')||act.includes('underweight')) ss++;
-        else if(act.includes('sell')||act.includes('negative')||act.includes('reduce')||act.includes('trim')) s++;
-        else h++;
-      });
-      if(sb+b+h+s+ss>0) recTrend=[{strongBuy:sb,buy:b,hold:h,sell:s,strongSell:ss}];
+    var insResult={data:[]};
+    if(insiderData&&insiderData.length) {
+      insResult.data=insiderData.map(t=>({
+        transactionDate:t.transactionDate||t.filingDate||'',
+        transactionCode:(t.transactionType||t.acquistionOrDisposition||'').toUpperCase().indexOf('P')>=0?'P':'S',
+        share:Math.abs(t.securitiesTransacted||t.sharesTransacted||t.shares||0)
+      }));
     }
-  } catch(e) {}
 
-  // Normalize earnings calendar
-  var calResult = {earningsCalendar:[]};
-  if(earningsData && earningsData.length) {
-    calResult.earningsCalendar = earningsData.map(e=>({date:e.date, symbol:e.symbol}));
-  }
+    // Now await Yahoo and merge
+    var ya=await yahooAnalystPromise;
+    var fmpRaw={recTrend,priceTarget:ptResult};
+    var merged=mergeAnalystData(fmpRaw, ya);
 
-  // Normalize insider data
-  var insResult = {data:[]};
-  if(insiderData && insiderData.length) {
-    insResult.data = insiderData.map(t=>({
-      transactionDate: t.transactionDate||t.filingDate||'',
-      // v4 uses transactionType: "P-Purchase" or "S-Sale" etc
-      transactionCode: (t.transactionType||t.acquistionOrDisposition||'')
-        .toUpperCase().indexOf('P')>=0?'P':'S',
-      share: Math.abs(t.securitiesTransacted||t.sharesTransacted||t.shares||0)
-    }));
-  }
+    if(merged.recTrend&&merged.recTrend.length) {
+      var fd=document.getElementById('fmpDot'),ft=document.getElementById('fmpTxt');
+      if(fd){fd.className='dot on';} if(ft) ft.textContent='FMP: Live';
+    }
 
-  var result = {recTrend, priceTarget:ptResult, calendar:calResult, insider:insResult};
+    var result={
+      recTrend:merged.recTrend,
+      priceTarget:merged.priceTarget,
+      calendar:calResult,
+      insider:insResult,
+      _analystSource:merged.source,
+      _yahooRecKey:merged.yahooRecKey,
+      _yahooRecMean:merged.yahooRecMean,
+      _yahooNumAnalysts:merged.yahooNumAnalysts
+    };
 
-  // Cache to localStorage
-  try {
-    localStorage.setItem(cacheKey, JSON.stringify(result));
-    localStorage.setItem(cacheKey+'_ts', now.toString());
-  } catch(e) {}
+    try {
+      localStorage.setItem(cacheKey,JSON.stringify(result));
+      localStorage.setItem(cacheKey+'_ts',now.toString());
+    } catch(e){}
 
-  return result;
+    return result;
   } catch(e) {
-    // If rate limited, flag it so subsequent tickers skip FMP calls today
     if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) {
-      try { localStorage.setItem('fmp_limit_'+new Date().toDateString(),'1'); } catch(ex){}
-      // Show warning in status bar
+      try{localStorage.setItem('fmp_limit_'+new Date().toDateString(),'1');}catch(ex){}
       var el=document.getElementById('lupd');
       if(el&&!el.textContent.includes('FMP limit'))
-        el.textContent='⚠ FMP daily limit reached — analyst/earnings/insider unavailable until midnight UTC';
+        el.textContent='⚠ FMP daily limit reached — using Yahoo analyst data instead';
     }
-    return empty;
+    // Even if FMP fails, return Yahoo data
+    var ya=await yahooAnalystPromise;
+    var merged=mergeAnalystData(empty,ya);
+    return Object.assign(empty,{
+      recTrend:merged.recTrend,
+      priceTarget:merged.priceTarget,
+      _analystSource:merged.source,
+      _yahooRecKey:merged.yahooRecKey,
+      _yahooRecMean:merged.yahooRecMean,
+      _yahooNumAnalysts:merged.yahooNumAnalysts
+    });
   }
 }
 
-
-// ── FALLBACK candles from Finnhub data ────────────────
+// ── FALLBACK CANDLES ───────────────────────────────────
 function buildFallback(quote, metrics) {
   var mm=(metrics&&metrics.metric)?metrics.metric:{};
   var price=quote.c||0, pc=quote.pc||price;
@@ -626,12 +722,12 @@ function buildFallback(quote, metrics) {
   var beta=mm.beta||1, range=h52-l52;
   var pct=range>0?(price-l52)/range:0.5;
   var bias=(pct-0.5)*0.002*price;
-  var start=Math.max(l52, Math.min(h52, price-bias*60));
+  var start=Math.max(l52,Math.min(h52,price-bias*60));
   var c=[],v=[];
   for(var i=0;i<60;i++){
-    var t=i/59, trend=start+(price-start)*t;
+    var t=i/59,trend=start+(price-start)*t;
     var noise=(Math.random()-.5)*range*0.012*(beta||1);
-    c.push(Math.max(l52*.95, trend+noise));
+    c.push(Math.max(l52*.95,trend+noise));
     v.push(1000000+Math.random()*4000000);
   }
   c[58]=pc; c[59]=price;
@@ -641,42 +737,35 @@ function buildFallback(quote, metrics) {
 // ── LOAD ONE TICKER ───────────────────────────────────
 async function loadTickerCore(ticker) {
   try {
-    // Step 1: Finnhub calls in parallel (fast, 3 calls)
-    var [quote, profile, metrics] = await Promise.all([
+    var [quote,profile,metrics]=await Promise.all([
       fhGet('/quote?symbol='+ticker),
       fhGet('/stock/profile2?symbol='+ticker),
       fhGet('/stock/metric?symbol='+ticker+'&metric=all'),
     ]);
-
-    // Step 2: Candles + FMP in parallel
-    var [candles, fmpData] = await Promise.all([
-      getCandles(ticker, quote, metrics),
+    var [candles,fmpData]=await Promise.all([
+      getCandles(ticker,quote,metrics),
       fmpFundamentals(ticker).catch(()=>({recTrend:[],priceTarget:{},calendar:{earningsCalendar:[]},insider:{data:[]}}))
     ]);
-
-    // Update header status dots based on candle source
-    if(candles.s==='twelvedata') {
+    if(candles.s==='twelvedata'||candles.s==='yahoo') {
       var td=document.getElementById('tdDot'),tt=document.getElementById('tdTxt');
       if(td){td.className='dot on';}
-      if(tt) tt.textContent='TwelveData: Live';
-    } else if(candles.s==='yahoo') {
-      var td=document.getElementById('tdDot'),tt=document.getElementById('tdTxt');
-      if(td){td.className='dot on';}
-      if(tt) tt.textContent='TD/Yahoo: Live';
+      if(tt) tt.textContent=candles.s==='twelvedata'?'TwelveData: Live':'TD/Yahoo: Live';
     }
-    if(fmpData.recTrend && fmpData.recTrend.length) {
+    if(fmpData.recTrend&&fmpData.recTrend.length) {
       var fd=document.getElementById('fmpDot'),ft=document.getElementById('fmpTxt');
-      if(fd){fd.className='dot on';}
-      if(ft) ft.textContent='FMP: Live';
+      if(fd){fd.className='dot on';} if(ft) ft.textContent='FMP: Live';
     }
-
     DATA[ticker]={
-      quote, profile, metrics,
+      quote,profile,metrics,
       recTrend:fmpData.recTrend,
       priceTarget:fmpData.priceTarget,
       calendar:fmpData.calendar,
       insider:fmpData.insider,
       candles,
+      analystSource:fmpData._analystSource||'fmp',
+      yahooRecKey:fmpData._yahooRecKey||'',
+      yahooRecMean:fmpData._yahooRecMean||0,
+      yahooNumAnalysts:fmpData._yahooNumAnalysts||0,
       err:null
     };
   } catch(e) {
@@ -685,27 +774,21 @@ async function loadTickerCore(ticker) {
 }
 
 async function loadTicker(ticker) {
-  // 30 second max timeout per ticker — prevents infinite hangs
-  var timeoutPromise = new Promise((_,reject)=>
-    setTimeout(()=>reject(new Error('Timeout after 30s')), 30000));
-  try {
-    await Promise.race([loadTickerCore(ticker), timeoutPromise]);
-  } catch(e) {
-    DATA[ticker] = {err: e.message};
-  }
+  var timeoutPromise=new Promise((_,reject)=>setTimeout(()=>reject(new Error('Timeout after 30s')),30000));
+  try { await Promise.race([loadTickerCore(ticker),timeoutPromise]); }
+  catch(e) { DATA[ticker]={err:e.message}; }
 }
 
-// ── RETRY WRAPPER — up to 3 attempts with backoff ─────
 async function loadTickerWithRetry(ticker, attempt) {
   attempt=attempt||1;
   await loadTicker(ticker);
   var err=DATA[ticker]&&DATA[ticker].err;
-  if(err && (err.indexOf('429')>=0||err.indexOf('Rate')>=0) && attempt<3) {
-    var wait=attempt===1?3000:6000; // 3s then 6s backoff
+  if(err&&(err.indexOf('429')>=0||err.indexOf('Rate')>=0)&&attempt<3) {
+    var wait=attempt===1?3000:6000;
     if(document.getElementById('progTxt'))
       document.getElementById('progTxt').textContent=ticker+' rate limited, retrying in '+(wait/1000)+'s…';
     await new Promise(r=>setTimeout(r,wait));
-    await loadTickerWithRetry(ticker, attempt+1);
+    await loadTickerWithRetry(ticker,attempt+1);
   }
 }
 
@@ -719,25 +802,18 @@ function init() {
     var saved=localStorage.getItem('wi_list');
     WATCHLIST=saved?JSON.parse(saved):['AAPL','AMD','NVDA','MSFT'];
   } catch(e){WATCHLIST=['AAPL','AMD','NVDA','MSFT'];}
-
   if(FH_KEY) document.getElementById('fhKey').value=FH_KEY;
   if(TD_KEY) document.getElementById('tdKey').value=TD_KEY;
   if(FMP_KEY) document.getElementById('fmpKey').value=FMP_KEY;
-
-  if(FH_KEY) {
-    setDot('fh','on','Finnhub: Live');
-    document.getElementById('banner').style.display='none';
-  }
+  if(FH_KEY){setDot('fh','on','Finnhub: Live');document.getElementById('banner').style.display='none';}
   if(TD_KEY) setDot('td','on','TwelveData: Live');
   if(FMP_KEY) setDot('fmp','on','FMP: Live');
-
   renderChips(); buildGlossary(); renderTable();
   if(FH_KEY&&WATCHLIST.length) refreshAll();
 }
 
 // ── CONNECT ───────────────────────────────────────────
 async function connectAPIs() {
-  // Note: don't pre-clear wi_fh here — only clear on successful reconnect
   var fk=document.getElementById('fhKey').value.trim();
   var tk=document.getElementById('tdKey').value.trim();
   var mk=document.getElementById('fmpKey').value.trim();
@@ -756,11 +832,8 @@ async function connectAPIs() {
     localStorage.setItem('wi_fh',fk);
     if(tk) localStorage.setItem('wi_td',tk);
     if(mk) {
-      // Clear FMP cache when key changes so fresh data loads
-      var oldKey = localStorage.getItem('wi_fmp');
-      if(oldKey !== mk) {
-        Object.keys(localStorage).filter(k=>k.startsWith('fmp_')).forEach(k=>localStorage.removeItem(k));
-      }
+      var oldKey=localStorage.getItem('wi_fmp');
+      if(oldKey!==mk) Object.keys(localStorage).filter(k=>k.startsWith('fmp_')).forEach(k=>localStorage.removeItem(k));
       localStorage.setItem('wi_fmp',mk);
     }
     if(uk) localStorage.setItem('wi_uw',uk);
@@ -780,49 +853,30 @@ async function connectAPIs() {
   }
 }
 
-function setDot(id, state, label) {
-  var d=document.getElementById(id+'Dot'), t=document.getElementById(id+'Txt');
+function setDot(id,state,label) {
+  var d=document.getElementById(id+'Dot'),t=document.getElementById(id+'Txt');
   if(d) d.className='dot'+(state==='on'?' on':state==='err'?' err':'');
   if(t&&label) t.textContent=label;
 }
 
 // ── WATCHLIST ─────────────────────────────────────────
-function bulkImport() {
-  var panel = document.getElementById('bulkPanel');
-  panel.style.display = panel.style.display==='none'||!panel.style.display ? 'block' : 'none';
-}
-
-function bulkImportConfirm() {
-  var val = document.getElementById('bulkInput').value;
+function bulkImport(){var p=document.getElementById('bulkPanel');p.style.display=p.style.display==='none'||!p.style.display?'block':'none';}
+function bulkImportConfirm(){
+  var val=document.getElementById('bulkInput').value;
   if(!val.trim()) return;
-  var tickers = val.toUpperCase()
-    .split(/[,\s;]+/)
-    .map(t=>t.replace(/[^A-Z\.]/g,''))
-    .filter(t=>t.length>0&&t.length<=6);
-  var added = [];
-  tickers.forEach(t=>{
-    if(t && WATCHLIST.indexOf(t)<0) {
-      WATCHLIST.push(t);
-      added.push(t);
-    }
-  });
+  var tickers=val.toUpperCase().split(/[,\s;]+/).map(t=>t.replace(/[^A-Z\.]/g,'')).filter(t=>t.length>0&&t.length<=6);
+  var added=[];
+  tickers.forEach(t=>{if(t&&WATCHLIST.indexOf(t)<0){WATCHLIST.push(t);added.push(t);}});
   document.getElementById('bulkPanel').style.display='none';
   document.getElementById('bulkInput').value='';
-  if(added.length) {
-    save();
-    renderChips();
-    renderTable();
-    document.getElementById('lupd').textContent='Added '+added.length+' tickers — loading…';
-    if(FH_KEY) refreshAll();
-  }
+  if(added.length){save();renderChips();renderTable();document.getElementById('lupd').textContent='Added '+added.length+' tickers — loading…';if(FH_KEY)refreshAll();}
 }
-
-async function addTicker() {
+async function addTicker(){
   var input=document.getElementById('tinput');
   var t=input.value.trim().toUpperCase().replace(/[^A-Z\.]/g,'');
   if(!t||WATCHLIST.indexOf(t)>=0){input.value='';return;}
-  WATCHLIST.push(t); save(); input.value='';
-  renderChips(); renderTable();
+  WATCHLIST.push(t);save();input.value='';
+  renderChips();renderTable();
   if(FH_KEY){await loadTickerWithRetry(t);renderTable();}
 }
 function removeTicker(t){WATCHLIST=WATCHLIST.filter(x=>x!==t);delete DATA[t];save();renderChips();renderTable();}
@@ -834,36 +888,18 @@ function renderChips(){
 }
 
 // ── REFRESH ───────────────────────────────────────────
-async function refreshAll() {
+async function refreshAll(){
   if(!FH_KEY){alert('Please connect your Finnhub API key first.');return;}
   var btn=document.getElementById('refBtn');
-  if(btn.dataset.loading==='1') return; // prevent double-click
-  btn.dataset.loading='1';
-  btn.classList.add('spinning');
+  if(btn.dataset.loading==='1') return;
+  btn.dataset.loading='1'; btn.classList.add('spinning');
   var prog=document.getElementById('progTxt');
-
-  // Always do a full refresh when user explicitly hits Refresh All
-  // This ensures stale in-memory scores (like RSI) get recalculated from fresh candles
-  var toLoad = [...WATCHLIST];
-
-  // Show loading rows only for tickers being fetched
-  toLoad.forEach(t=>{
-    DATA[t]={err:null,_loading:true};
-  });
+  var toLoad=[...WATCHLIST];
+  toLoad.forEach(t=>{DATA[t]={err:null,_loading:true};});
   renderTable();
-
-  // Batch of 3, 2.5s gap — stays well under Finnhub 60 calls/min free limit
-  // 3 tickers × 3 FH calls = 9 calls per batch, 2.5s apart = ~216 calls/min max but
-  // realistically ~22 calls/30s which is safe
-  // Batch of 3 with 8s gap:
-  // - TD: 3 calls per batch, 8s gap = 22.5 calls/min (under 8/min? No — but TD counts per minute
-  //   from first call, so 3 calls then 8s wait = ~22/min peak but averages to ~11/min)
-  // - Actually safest: batch 2, 9s gap = 2 calls per 9s = 13/min, still risks hitting 8/min
-  // - Best: batch 1, 8s gap = 7.5 calls/min, safely under TD 8/min limit
-  // Trade-off: 60 tickers × 8s = 8 minutes total. Acceptable for reliable green dots.
   var BATCH=1;
   var loaded=0;
-  for(var i=0;i<toLoad.length;i+=BATCH) {
+  for(var i=0;i<toLoad.length;i+=BATCH){
     var batch=toLoad.slice(i,i+BATCH);
     loaded+=batch.length;
     if(prog) prog.textContent=loaded+'/'+toLoad.length+' loaded…';
@@ -871,9 +907,7 @@ async function refreshAll() {
     renderTable();
     if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,8000));
   }
-
-  btn.classList.remove('spinning');
-  btn.dataset.loading='0';
+  btn.classList.remove('spinning'); btn.dataset.loading='0';
   if(prog) prog.textContent='';
   document.getElementById('lupd').textContent='Updated: '+new Date().toLocaleTimeString();
   renderTable();
@@ -882,54 +916,12 @@ async function refreshAll() {
 // ── MATH HELPERS ──────────────────────────────────────
 function clamp(v,mn,mx){return Math.min(mx,Math.max(mn,v));}
 function ema(data,p){var k=2/(p+1),e=data[0];for(var i=1;i<data.length;i++)e=data[i]*k+e*(1-k);return e;}
+function calcSlope(arr,n){n=n||20;if(arr.length<5)return 50;var a=arr.slice(-Math.min(n,arr.length));var xm=(a.length-1)/2,ym=a.reduce((s,v)=>s+v,0)/a.length;var num=0,den=0;a.forEach((y,x)=>{num+=(x-xm)*(y-ym);den+=(x-xm)**2;});var slope=den?num/den:0;return clamp(50+(slope/ym)*100*40,0,100);}
+function calcRSI(arr,p){p=p||14;if(arr.length<p+2)return 50;var slice=arr.slice(-(p+1));var gains=[],losses=[];for(var i=1;i<slice.length;i++){var diff=slice[i]-slice[i-1];gains.push(diff>0?diff:0);losses.push(diff<0?-diff:0);}var ag=gains.reduce((a,b)=>a+b,0)/p;var al=losses.reduce((a,b)=>a+b,0)/p;if(al===0)return 100;if(ag===0)return 0;return Math.round(100-100/(1+ag/al));}
+function calcMACD(arr){if(arr.length<27)return 50;var line=ema(arr,12)-ema(arr,26),last=arr[arr.length-1]||1;return clamp(50+(line/last)*600,0,100);}
+function calcDecay(arr){if(arr.length<21)return 50;var s5=arr[arr.length-1]-arr[arr.length-6];var s20=arr[arr.length-1]-arr[arr.length-21];if(s20===0)return 50;var r=s5/Math.abs(s20);if(r>1.1)return 15;if(r>0.8)return 38;if(r>0.4)return 62;return 80;}
+function calcBlockProxy(closes,vols){if(!closes||!vols||closes.length<6)return 50;var n=Math.min(20,closes.length-1,vols.length-1),up=0,dn=0;for(var i=closes.length-n;i<closes.length;i++){var chg=closes[i]-closes[i-1];if(chg>0)up+=vols[i]||0;else dn+=vols[i]||0;}var tot=up+dn;return tot?clamp((up/tot)*100,0,100):50;}
 
-function calcSlope(arr,n){
-  n=n||20; if(arr.length<5)return 50;
-  var a=arr.slice(-Math.min(n,arr.length));
-  var xm=(a.length-1)/2, ym=a.reduce((s,v)=>s+v,0)/a.length;
-  var num=0,den=0;
-  a.forEach((y,x)=>{num+=(x-xm)*(y-ym);den+=(x-xm)**2;});
-  var slope=den?num/den:0;
-  return clamp(50+(slope/ym)*100*40,0,100);
-}
-function calcRSI(arr,p){
-  p=p||14;
-  if(arr.length<p+2) return 50;
-  // Use last p+1 closes to get p differences
-  var slice = arr.slice(-(p+1));
-  var gains=[], losses=[];
-  for(var i=1;i<slice.length;i++){
-    var diff=slice[i]-slice[i-1];
-    gains.push(diff>0?diff:0);
-    losses.push(diff<0?-diff:0);
-  }
-  var ag=gains.reduce((a,b)=>a+b,0)/p;
-  var al=losses.reduce((a,b)=>a+b,0)/p;
-  if(al===0) return 100;
-  if(ag===0) return 0;
-  return Math.round(100-100/(1+ag/al));
-}
-function calcMACD(arr){
-  if(arr.length<27)return 50;
-  var line=ema(arr,12)-ema(arr,26),last=arr[arr.length-1]||1;
-  return clamp(50+(line/last)*600,0,100);
-}
-function calcDecay(arr){
-  if(arr.length<21)return 50;
-  var s5=arr[arr.length-1]-arr[arr.length-6];
-  var s20=arr[arr.length-1]-arr[arr.length-21];
-  if(s20===0)return 50;
-  var r=s5/Math.abs(s20);
-  if(r>1.1)return 15; if(r>0.8)return 38; if(r>0.4)return 62; return 80;
-}
-function calcBlockProxy(closes,vols){
-  if(!closes||!vols||closes.length<6)return 50;
-  var n=Math.min(20,closes.length-1,vols.length-1),up=0,dn=0;
-  for(var i=closes.length-n;i<closes.length;i++){var chg=closes[i]-closes[i-1];if(chg>0)up+=vols[i]||0;else dn+=vols[i]||0;}
-  var tot=up+dn; return tot?clamp((up/tot)*100,0,100):50;
-}
-
-// Sector-aware PE benchmarks
 var SECTOR_PE={
   'Technology':35,'Information Technology':35,'Software':38,'Semiconductors':30,
   'Health Care':22,'Healthcare':22,'Biotechnology':28,'Pharmaceuticals':20,
@@ -937,29 +929,35 @@ var SECTOR_PE={
   'Consumer Discretionary':25,'Consumer Staples':22,'Communication Services':22,
   'Energy':14,'Utilities':18,'Real Estate':35,'Industrials':22,'Materials':18,'default':21
 };
-function getSectorPE(ind){
-  if(!ind)return SECTOR_PE.default;
-  if(SECTOR_PE[ind])return SECTOR_PE[ind];
-  for(var k in SECTOR_PE)if(ind.toLowerCase().indexOf(k.toLowerCase())>=0)return SECTOR_PE[k];
-  return SECTOR_PE.default;
-}
+function getSectorPE(ind){if(!ind)return SECTOR_PE.default;if(SECTOR_PE[ind])return SECTOR_PE[ind];for(var k in SECTOR_PE)if(ind.toLowerCase().indexOf(k.toLowerCase())>=0)return SECTOR_PE[k];return SECTOR_PE.default;}
 
-function calcAnalyst(recTrend, priceTarget, currentPrice) {
+// ── CALC ANALYST — updated to use Yahoo recMean for confidence ─
+// Yahoo recMean: 1=Strong Buy → 5=Strong Sell
+// Converts to 0–100 score: recMean 1→score 90, 3→50, 5→10
+function calcAnalyst(recTrend, priceTarget, currentPrice, yahooRecMean, yahooNumAnalysts) {
   var hasRec=recTrend&&recTrend.length>0;
   var hasPT=priceTarget&&priceTarget.targetMean&&currentPrice>0;
-  if(!hasRec&&!hasPT)return{score:50,upside:0,hasData:false};
+  var hasYahooRec=yahooRecMean>0&&yahooNumAnalysts>0;
+  if(!hasRec&&!hasPT&&!hasYahooRec) return{score:50,upside:0,hasData:false};
   var score=50,upside=0;
   if(hasRec){
     var l=recTrend[0];
-    var buy=(l.strongBuy||0)+(l.buy||0), sell=(l.strongSell||0)+(l.sell||0), hold=l.hold||0;
+    var buy=(l.strongBuy||0)+(l.buy||0),sell=(l.strongSell||0)+(l.sell||0),hold=l.hold||0;
     var total=buy+sell+hold;
     if(total>0)score=clamp((buy/total)*100-(sell/total)*30+30,0,100);
+  } else if(hasYahooRec) {
+    // Convert Yahoo's 1–5 mean to 0–100 score
+    // 1.0 → 100, 2.0 → 75, 3.0 → 50, 4.0 → 25, 5.0 → 0
+    score=clamp(125-(yahooRecMean*25),0,100);
+    // Weight by number of analysts (more analysts = more confidence)
+    var confidence=Math.min(yahooNumAnalysts/20,1); // 20+ analysts = full confidence
+    score=Math.round(score*confidence+50*(1-confidence));
   }
   if(hasPT){
     upside=(priceTarget.targetMean-currentPrice)/currentPrice*100;
-    score=clamp(score+upside*(hasRec?1.5:0.8),0,100);
+    score=clamp(score+upside*(hasRec||hasYahooRec?1.5:0.8),0,100);
   }
-  return{score:Math.round(score),upside,hasData:true};
+  return{score:Math.round(score),upside,hasData:true,numAnalysts:yahooNumAnalysts||0};
 }
 
 function calcEarnings(calendar){
@@ -974,13 +972,12 @@ function calcEarnings(calendar){
 
 function calcInsider(insider){
   if(!insider||!insider.data||!insider.data.length)return{net:0,label:'—'};
-  var cutoff=new Date(); cutoff.setDate(cutoff.getDate()-90);
+  var cutoff=new Date();cutoff.setDate(cutoff.getDate()-90);
   var net=0;
   insider.data.forEach(tx=>{
     if(!tx.transactionDate||new Date(tx.transactionDate)<cutoff)return;
     var shares=tx.share||0;
-    if(tx.transactionCode==='P')net+=shares;
-    else if(tx.transactionCode==='S')net-=shares;
+    if(tx.transactionCode==='P')net+=shares; else if(tx.transactionCode==='S')net-=shares;
   });
   var label=net>5000?'▲ Buying':net<-5000?'▼ Selling':'— Neutral';
   return{net,label};
@@ -989,23 +986,21 @@ function calcInsider(insider){
 // ── SCORES ────────────────────────────────────────────
 function scores(ticker){
   var d=DATA[ticker];
-  if(!d||d.err)return null;
+  if(!d||d.err) return null;
   var q=d.quote||{},m=d.metrics||{},c=d.candles||{};
   var mm=m.metric||{};
-  var closes=c.c||[], vols=c.v||[];
+  var closes=c.c||[],vols=c.v||[];
   var price=q.c||0;
 
   var slope=calcSlope(closes,20);
   var rsiNow=calcRSI(closes,14);
-  // RSI Trend: delta × 1.5 instead of × 2 — less exaggerated, more honest
-  // +15 delta → score 72 (strong), +5 → score 57 (building), 0 → 50 (flat), -10 → 35 (weakening)
   var rsiDelta=closes.length>24?Math.round((calcRSI(closes.slice(-14),14)-calcRSI(closes.slice(-24,-10),14))*10)/10:0;
   var rsiTrnd=closes.length>24?clamp(50+rsiDelta*1.5,0,100):50;
   var macd=calcMACD(closes);
   var decay=calcDecay(closes);
   var mom=clamp(slope*.30+rsiTrnd*.25+macd*.30+(100-decay)*.15,0,100);
 
-  var pe=mm.peTTM||null, ev=mm['ev/ebitda']||null;
+  var pe=mm.peTTM||null,ev=mm['ev/ebitda']||null;
   var industry=(d.profile&&d.profile.finnhubIndustry)||'';
   var sectorPE=getSectorPE(industry);
   var pevs=pe?clamp(100-((pe/sectorPE-.5)*80),0,100):50;
@@ -1018,19 +1013,18 @@ function scores(ticker){
     (vols.slice(-5).reduce((a,b)=>a+b,0)/5)/(vols.slice(-20).reduce((a,b)=>a+b,0)/20):1;
   var ma20=closes.length>=20?closes.slice(-20).reduce((a,b)=>a+b,0)/20:price;
   var accum=clamp((price>ma20?60:40)+(block-50)*.4,0,100);
-  // Vol Ratio score: 1.0× = neutral(50), 2.0× = strong(83), 3.0×+ = max(100), 0.5× = weak(25)
-  var volRatScore=clamp((volRat-0.5)/2.5*100,0,100); // 0.5× floor, 3.0× ceiling
+  var volRatScore=clamp((volRat-0.5)/2.5*100,0,100);
   var smart=clamp(block*.40+volRatScore*.35+accum*.25,0,100);
 
-  var h52=mm['52WeekHigh']||price*1.3, l52=mm['52WeekLow']||price*0.7;
+  var h52=mm['52WeekHigh']||price*1.3,l52=mm['52WeekLow']||price*0.7;
   var r52=(h52-l52)?(price-l52)/(h52-l52)*100:50;
   var ready=clamp(mom*.4+(100-r52)*.3+slope*.3,0,100);
 
-  var d20pct=ma20?Math.round(Math.abs((price-ma20)/ma20*100)*10)/10:0; // real % e.g. 2.2
-  var d20score=clamp(d20pct/15*100,0,100); // normalized: 15%+ = fully extended (score 100)
+  var d20pct=ma20?Math.round(Math.abs((price-ma20)/ma20*100)*10)/10:0;
+  var d20score=clamp(d20pct/15*100,0,100);
   var exhaust=clamp((rsiNow/100)*40+d20score*.40+decay*.20,0,100);
 
-  var analystData=calcAnalyst(d.recTrend,d.priceTarget,price);
+  var analystData=calcAnalyst(d.recTrend,d.priceTarget,price,d.yahooRecMean,d.yahooNumAnalysts);
   var earnData=calcEarnings(d.calendar);
   var insiderData=calcInsider(d.insider);
 
@@ -1045,9 +1039,9 @@ function scores(ticker){
     macd:Math.round(macd),decay:Math.round(decay),
     val:Math.round(val),pevs:Math.round(pevs),pevm:Math.round(pevm),evs:Math.round(evs),
     smart:Math.round(smart),block:Math.round(block),accum:Math.round(accum),
-    volRat:Math.round(volRat*100)/100,
-      volRatScore:Math.round(volRatScore),
+    volRat:Math.round(volRat*100)/100,volRatScore:Math.round(volRatScore),
     analyst:analystData.score,analystUpside:analystData.upside,analystHasData:analystData.hasData,
+    analystNumAnalysts:analystData.numAnalysts||0,
     earn:earnData,insider:insiderData,
     sig,
     raw:{
@@ -1065,47 +1059,43 @@ function scores(ticker){
       recBuy:d.recTrend&&d.recTrend[0]?(d.recTrend[0].strongBuy||0)+(d.recTrend[0].buy||0):0,
       recHold:d.recTrend&&d.recTrend[0]?d.recTrend[0].hold||0:0,
       recSell:d.recTrend&&d.recTrend[0]?(d.recTrend[0].strongSell||0)+(d.recTrend[0].sell||0):0,
-      insiderNet:insiderData.net
+      insiderNet:insiderData.net,
+      analystSource:d.analystSource||'fmp',
+      yahooRecKey:d.yahooRecKey||'',
+      yahooRecMean:d.yahooRecMean||0,
+      yahooNumAnalysts:d.yahooNumAnalysts||0
     }
   };
 }
 
 function computeSig(mom,val,smart,exhaust,setup,analyst){
-  // Hard overrides — extreme exhaustion caps signal regardless of other factors
   if(exhaust>=85) return mom>=60?'TRIM':'SELL';
-  if(exhaust>=75 && mom<40) return'SELL';
+  if(exhaust>=75&&mom<40) return 'SELL';
   var sc=0;
-  if(mom>=70)sc+=2; else if(mom>=50)sc+=1; else if(mom<30)sc-=2; else sc-=1;
-  if(val>=60)sc+=1; else if(val<30)sc-=1;
-  if(smart>=65)sc+=2; else if(smart>=45)sc+=1; else if(smart<30)sc-=2; else sc-=1;
-  if(exhaust>=75)sc-=3; else if(exhaust>=60)sc-=2; else if(exhaust>=50)sc-=1;
+  if(mom>=70)sc+=2;else if(mom>=50)sc+=1;else if(mom<30)sc-=2;else sc-=1;
+  if(val>=60)sc+=1;else if(val<30)sc-=1;
+  if(smart>=65)sc+=2;else if(smart>=45)sc+=1;else if(smart<30)sc-=2;else sc-=1;
+  if(exhaust>=75)sc-=3;else if(exhaust>=60)sc-=2;else if(exhaust>=50)sc-=1;
   if(setup>=75)sc+=1;
-  if(analyst>=70)sc+=1; else if(analyst<30&&analyst>0)sc-=1;
-  if(sc>=5)return'BUY'; if(sc>=2)return'ACCUMULATE'; if(sc>=-1)return'NEUTRAL'; if(sc>=-4)return'TRIM'; return'SELL';
+  if(analyst>=70)sc+=1;else if(analyst<30&&analyst>0)sc-=1;
+  if(sc>=5)return'BUY';if(sc>=2)return'ACCUMULATE';if(sc>=-1)return'NEUTRAL';if(sc>=-4)return'TRIM';return'SELL';
 }
 
 // ── SORT ──────────────────────────────────────────────
 function sortBy(col){
-  if(SORT_COL===col)SORT_DIR*=-1; else{SORT_COL=col;SORT_DIR=1;}
+  if(SORT_COL===col)SORT_DIR*=-1;else{SORT_COL=col;SORT_DIR=1;}
   document.querySelectorAll('.th').forEach(th=>th.classList.remove('sort-asc','sort-desc'));
   var el=document.getElementById('th-'+col);
   if(el)el.classList.add(SORT_DIR===1?'sort-asc':'sort-desc');
   renderTable();
 }
 function getSortVal(ticker,col){
-  var s=scores(ticker); if(!s)return-999;
+  var s=scores(ticker);if(!s)return-999;
   switch(col){
-    case'ticker':return ticker;
-    case'price':return s.price;
-    case'chg':return s.chg;
-    case'exhaustion':return s.exhaustion;
-    case'mom':return s.mom;
-    case'val':return s.val;
-    case'analyst':return s.analyst;
-    case'smart':return s.smart;
-    case'readiness':return s.readiness;
-    case'earn':return s.earn?s.earn.days:9999;
-    case'insider':return s.insider?s.insider.net:0;
+    case'ticker':return ticker;case'price':return s.price;case'chg':return s.chg;
+    case'exhaustion':return s.exhaustion;case'mom':return s.mom;case'val':return s.val;
+    case'analyst':return s.analyst;case'smart':return s.smart;case'readiness':return s.readiness;
+    case'earn':return s.earn?s.earn.days:9999;case'insider':return s.insider?s.insider.net:0;
     case'sig':{var o={BUY:5,ACCUMULATE:4,NEUTRAL:3,TRIM:2,SELL:1};return o[s.sig]||3;}
     default:return 0;
   }
@@ -1117,7 +1107,7 @@ function scBarInv(v){return v>=70?'br':v>=45?'by':v>=30?'bb':'bg';}
 function scColor(v){return v>=70?'var(--green)':v>=45?'var(--accent)':v>=30?'var(--yellow)':'var(--red)';}
 function scBar(v){return v>=70?'bg':v>=45?'bb':v>=30?'by':'br';}
 function scCell(v,inv){
-  var col=inv?scColorInv(v):scColor(v), bar=inv?scBarInv(v):scBar(v);
+  var col=inv?scColorInv(v):scColor(v),bar=inv?scBarInv(v):scBar(v);
   return`<div class="cell"><div class="sc"><div class="sc-val" style="color:${col}">${v}</div><div class="bar-t"><div class="bar-f ${bar}" style="width:${v}%"></div></div></div></div>`;
 }
 function sbRow(lbl,v,inv){
@@ -1126,14 +1116,12 @@ function sbRow(lbl,v,inv){
 }
 function sigClass(s){return{BUY:'s-buy',ACCUMULATE:'s-acc',NEUTRAL:'s-neu',TRIM:'s-trim',SELL:'s-sell'}[s]||'s-neu';}
 function sigDot(s){return{BUY:'🟢',ACCUMULATE:'🔵',NEUTRAL:'⚪',TRIM:'🟠',SELL:'🔴'}[s]||'⚪';}
-
-function rsiColor(rsi){
-  if(rsi>=70)return'#ffd740'; if(rsi<=30)return'#00e676'; return'#00d4ff';
-}
-function rsiNote(rsi){
-  if(rsi>=70)return'⚠ Overbought — caution for new long entries';
-  if(rsi<=30)return'✓ Oversold — potential bounce setup';
-  return'Neutral range (30–70)';
+function rsiColor(rsi){if(rsi>=70)return'#ffd740';if(rsi<=30)return'#00e676';return'#00d4ff';}
+function rsiNote(rsi){if(rsi>=70)return'⚠ Overbought — caution for new long entries';if(rsi<=30)return'✓ Oversold — potential bounce setup';return'Neutral range (30–70)';}
+function analystSourceBadge(src){
+  if(src==='both') return '<span class="src-both">FMP + Yahoo</span>';
+  if(src==='yahoo') return '<span class="src-yahoo">Yahoo Finance</span>';
+  return '<span class="src-fmp">FMP</span>';
 }
 
 // ── AUDIT ITEM ────────────────────────────────────────
@@ -1170,7 +1158,7 @@ function renderTable(){
 
 function renderSection(ticker){
   var d=DATA[ticker];
-  if(!d||d._loading)return`<div class="lrow"><div class="spinner"></div>Loading ${ticker}…</div>`;
+  if(!d||d._loading) return`<div class="lrow"><div class="spinner"></div>Loading ${ticker}…</div>`;
   if(d.err){
     var errType=d.err.indexOf('429')>=0?'⏱ Rate limited — wait 30s then hit Refresh All':
                 d.err.indexOf('403')>=0?'🔒 Requires API upgrade':
@@ -1178,32 +1166,24 @@ function renderSection(ticker){
                 '⚠ '+d.err;
     return`<div class="erow"><span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);">${ticker}</span><span>${errType}</span></div>`;
   }
-  var s=scores(ticker); if(!s)return`<div class="erow">⚠ ${ticker}: score error</div>`;
+  var s=scores(ticker);if(!s)return`<div class="erow">⚠ ${ticker}: score error</div>`;
   var prof=d.profile||{};
-  var l2=EXPAND[ticker]?.l2, l3=EXPAND[ticker]?.l3;
-  var chgSign=s.chg>=0?'+':'', chgCls=s.chg>=0?'pos':'neg';
+  var l2=EXPAND[ticker]?.l2,l3=EXPAND[ticker]?.l3;
+  var chgSign=s.chg>=0?'+':'',chgCls=s.chg>=0?'pos':'neg';
   var name=(prof.name||'').substring(0,20);
   var candleSrc=d.candles?(d.candles.s||'fallback'):'fallback';
-  var srcDotColor = candleSrc==='fallback' ? 'var(--red)' : 'var(--green)';
-  var srcDotTitle = candleSrc==='fallback'
-    ? 'Synthetic estimated data — momentum scores less reliable'
-    : candleSrc==='yahoo' ? 'Yahoo Finance: real price data — scores reliable'
-    : 'TwelveData: real price data — scores reliable';
+  var srcDotColor=candleSrc==='fallback'?'var(--red)':'var(--green)';
+  var srcDotTitle=candleSrc==='fallback'?'Synthetic estimated data — momentum scores less reliable':
+    candleSrc==='yahoo'?'Yahoo Finance: real price data — scores reliable':'TwelveData: real price data — scores reliable';
   var srcDot=`<span title="${srcDotTitle}" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${srcDotColor};box-shadow:0 0 4px ${srcDotColor};margin-left:4px;vertical-align:middle;"></span>`;
 
-  // Earnings cell
   var earnHtml='<span class="earn-ok">—</span>';
-  if(s.earn){
-    var days=s.earn.days;
-    var cls=days<=7?'earn-alert':days<=14?'earn-warn':'earn-ok';
-    earnHtml=`<span class="${cls}">${days<=14?'⚠ ':''}${days}d</span>`;
-  }
+  if(s.earn){var days=s.earn.days;earnHtml=`<span style="color:${days<=7?'var(--red)':days<=14?'var(--yellow)':'var(--text2)'};">${days<=14?'⚠ ':''}${days}d</span>`;}
 
-  // Insider cell
   var insHtml='<span style="font-family:var(--mono);font-size:9px;color:var(--text3);">—</span>';
   if(s.insider&&s.insider.net!==0){
-    var icls=s.insider.net>5000?'ins-bull':s.insider.net<-5000?'ins-bear':'ins-neu';
-    insHtml=`<span class="${icls}">${s.insider.label}</span>`;
+    var icol=s.insider.net>5000?'var(--green)':s.insider.net<-5000?'var(--red)':'var(--text2)';
+    insHtml=`<span style="font-family:var(--mono);font-size:9px;color:${icol};">${s.insider.label}</span>`;
   }
 
   var html=`<div class="tsec" id="sec-${ticker}">`;
@@ -1214,10 +1194,8 @@ function renderSection(ticker){
     <div class="xbtn${l2?' open':''}">${l2?'−':'+'}</div>
     <div><div class="tsym">${ticker}${srcDot}</div><div class="tname">${name}</div></div>
     <button onclick="refreshTicker('${ticker}',event)" title="Refresh ${ticker} only"
-      style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:13px;
-      cursor:pointer;padding:0 4px;line-height:1;transition:color .2s;"
-      onmouseover="this.style.color='var(--accent)'" 
-      onmouseout="this.style.color='var(--text3)'">↻</button>
+      style="margin-left:auto;background:none;border:none;color:var(--text3);font-size:13px;cursor:pointer;padding:0 4px;line-height:1;transition:color .2s;"
+      onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text3)'">↻</button>
   </div></div>`;
   html+=`<div class="cell"><span class="mono" style="font-weight:700;font-size:12px;">$${s.price?s.price.toFixed(2):'—'}</span></div>`;
   html+=`<div class="cell"><span class="mono ${chgCls}">${chgSign}${s.chg.toFixed(2)}%</span></div>`;
@@ -1232,54 +1210,58 @@ function renderSection(ticker){
   html+=`<div class="cell"><span class="sig ${sigClass(s.sig)}">${sigDot(s.sig)} ${s.sig}</span></div>`;
   html+=`</div>`;
 
-  // LEVEL 2 — full width free-flowing cards, NOT constrained to column grid
+  // LEVEL 2
   if(l2){
-    // Toggle bar
     html+=`<div style="background:var(--bg3);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="toggleL3('${ticker}')">
       <div class="xbtn${l3?' open':''}" style="margin-left:22px;width:14px;height:14px;font-size:9px;">${l3?'−':'+'}</div>
       <span style="font-family:var(--mono);font-size:9px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;">Sub-Scores &amp; Raw Audit — click to ${l3?'collapse':'expand'}</span>
     </div>`;
 
-    // Row 1: Exhaustion | Momentum | Valuation | Analyst
+    // Row 1: 4 panels
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-top:1px solid var(--border);">`;
 
+    // Exhaustion
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ff3d57;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(255,61,87,.18);">↑ EXHAUSTION &nbsp;<span style="opacity:.55;font-size:8px;">HIGH=RED=BAD</span></div>
-      ${sbRow('RSI (14)', s.raw.rsi, true)}
+      ${sbRow('RSI (14)',s.raw.rsi,true)}
       <div class="sbar-row">
         <span class="sbar-lbl" style="width:90px;flex-shrink:0;">Dist 20DMA</span>
         <div class="sbar-t"><div class="sbar-f" style="width:${Math.min(s.raw.d20score||0,100)}%;background:${(s.raw.d20||0)>=12?'var(--red)':(s.raw.d20||0)>=7?'var(--yellow)':(s.raw.d20||0)>=3?'var(--accent)':'var(--green)'};"></div></div>
         <span class="sbar-v" style="color:${(s.raw.d20||0)>=12?'var(--red)':(s.raw.d20||0)>=7?'var(--yellow)':(s.raw.d20||0)>=3?'var(--accent)':'var(--green)'};">${s.raw.d20}%</span>
       </div>
-      ${sbRow('Decay', s.decay, true)}
+      ${sbRow('Decay',s.decay,true)}
     </div>`;
 
+    // Momentum
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ MOMENTUM inputs</div>
-      ${sbRow('Slope Strength', s.slope, false)}
+      ${sbRow('Slope Strength',s.slope,false)}
       <div class="sbar-row">
         <span class="sbar-lbl" style="width:90px;flex-shrink:0;">RSI Trend</span>
         <div class="sbar-t"><div class="sbar-f" style="width:${s.rsiTrnd}%;background:${s.rsiTrnd>=70?'var(--green)':s.rsiTrnd>=45?'var(--accent)':s.rsiTrnd>=30?'var(--yellow)':'var(--red)'};"></div></div>
         <span class="sbar-v" style="color:${s.rsiTrnd>=70?'var(--green)':s.rsiTrnd>=45?'var(--accent)':s.rsiTrnd>=30?'var(--yellow)':'var(--red)'};">${s.rsiTrnd} <span style="font-size:9px;opacity:.7;">(Δ${s.raw.rsiDelta>0?'+':''}${s.raw.rsiDelta})</span></span>
       </div>
-      ${sbRow('MACD Impulse', s.macd, false)}
-      ${sbRow('Mom. Holding', 100-s.decay, false)}
+      ${sbRow('MACD Impulse',s.macd,false)}
+      ${sbRow('Mom. Holding',100-s.decay,false)}
     </div>`;
 
+    // Valuation
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ffd740;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(255,215,64,.18);">↑ VALUATION inputs</div>
-      ${sbRow('PE vs Sector', s.pevs, false)}
-      ${sbRow('PE vs Market', s.pevm, false)}
-      ${sbRow('EV/EBITDA', s.evs, false)}
+      ${sbRow('PE vs Sector',s.pevs,false)}
+      ${sbRow('PE vs Market',s.pevm,false)}
+      ${sbRow('EV/EBITDA',s.evs,false)}
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">${s.raw.industry||'Unknown'} · Benchmark ${s.raw.sectorPE}×</div>
     </div>`;
 
+    // Analyst — enhanced with source badge + Yahoo rec
     html+=`<div style="background:var(--bg2);padding:14px 18px;">
-      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00e676;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,230,118,.18);">↑ ANALYST &nbsp;<span style="opacity:.55;font-size:8px;">FMP</span></div>
-      ${s.analystHasData ? sbRow('Score', s.analyst, false) : '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:6px;">Score: N/A (FMP)</div>'}
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00e676;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,230,118,.18);display:flex;align-items:center;gap:6px;">↑ ANALYST ${analystSourceBadge(s.raw.analystSource)}</div>
+      ${s.analystHasData?sbRow('Score',s.analyst,false):'<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:6px;">Score: N/A</div>'}
       <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Consensus $</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.raw.ptMean!=='N/A'?'$'+s.raw.ptMean:'N/A'}</span></div>
       <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Upside</span><span style="font-family:var(--mono);font-size:10px;color:${s.analystUpside>0?'var(--green)':'var(--red)'};">${s.analystHasData?(s.analystUpside>0?'+':'')+s.analystUpside.toFixed(1)+'%':'N/A'}</span></div>
       <div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Buy/Hold/Sell</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2);">${s.raw.recBuy} / ${s.raw.recHold} / ${s.raw.recSell}</span></div>
+      ${s.raw.yahooRecKey?`<div class="sbar-row"><span class="sbar-lbl" style="width:95px;flex-shrink:0;">Yahoo Rec</span><span style="font-family:var(--mono);font-size:10px;color:var(--accent);text-transform:capitalize;">${s.raw.yahooRecKey} (${s.raw.yahooNumAnalysts})</span></div>`:''}
     </div>`;
 
     html+=`</div>`; // end row 1
@@ -1289,32 +1271,32 @@ function renderSection(ticker){
 
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#a78bfa;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(167,139,250,.18);">↑ SMART $ &nbsp;<span style="opacity:.55;font-size:8px;">volume proxy</span></div>
-      ${sbRow('Block Proxy', s.block, false)}
+      ${sbRow('Block Proxy',s.block,false)}
       <div class="sbar-row">
         <span class="sbar-lbl" style="width:90px;flex-shrink:0;">Vol Ratio</span>
         <div class="sbar-t"><div class="sbar-f" style="width:${Math.min(s.raw.volRatScore||0,100)}%;background:${(s.raw.volRatScore||0)>=70?'var(--green)':(s.raw.volRatScore||0)>=45?'var(--accent)':(s.raw.volRatScore||0)>=30?'var(--yellow)':'var(--red)'};"></div></div>
         <span class="sbar-v" style="color:${(s.raw.volRatScore||0)>=70?'var(--green)':(s.raw.volRatScore||0)>=45?'var(--accent)':(s.raw.volRatScore||0)>=30?'var(--yellow)':'var(--red)'};">${s.volRat}×</span>
       </div>
-      ${sbRow('Accumulation', s.accum, false)}
+      ${sbRow('Accumulation',s.accum,false)}
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">Upgrades to real dark pool data when UW connected</div>
     </div>`;
 
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7a94aa;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(122,148,170,.18);">↑ CONTEXT &nbsp;<span style="opacity:.55;font-size:8px;">FMP</span></div>
-      <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Next Earnings</span><span style="font-family:var(--mono);font-size:10px;color:${s.earn&&s.earn.days<=14?'var(--yellow)':'var(--text2)'};">${s.earn?s.earn.date+' · '+s.earn.days+'d':' N/A'}</span></div>
+      <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Next Earnings</span><span style="font-family:var(--mono);font-size:10px;color:${s.earn&&s.earn.days<=14?'var(--yellow)':'var(--text2)'};">${s.earn?s.earn.date+' · '+s.earn.days+'d':'N/A'}</span></div>
       <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Insider 90d Net</span><span style="font-family:var(--mono);font-size:10px;color:${s.insider.net>5000?'var(--green)':s.insider.net<-5000?'var(--red)':'var(--text2)'};">${s.insider.net!==0?(s.insider.net>0?'+':'')+s.insider.net.toLocaleString():'No activity'}</span></div>
       <div class="sbar-row"><span class="sbar-lbl" style="width:110px;flex-shrink:0;">Insider Signal</span><span style="font-family:var(--mono);font-size:10px;">${s.insider.label}</span></div>
     </div>`;
 
     html+=`<div style="background:var(--bg2);padding:14px 18px;border-right:1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#00d4ff;padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid rgba(0,212,255,.18);">↑ READINESS inputs</div>
-      ${sbRow('Momentum', s.mom, false)}
+      ${sbRow('Momentum',s.mom,false)}
       <div class="sbar-row">
         <span class="sbar-lbl" style="width:90px;flex-shrink:0;">52W Position</span>
         <div class="sbar-t"><div class="sbar-f" style="width:${s.raw.r52}%;background:${s.raw.r52>=80?'var(--red)':s.raw.r52>=60?'var(--yellow)':s.raw.r52>=25?'var(--accent)':'var(--green)'};"></div></div>
         <span class="sbar-v" style="color:${s.raw.r52>=80?'var(--red)':s.raw.r52>=60?'var(--yellow)':s.raw.r52>=25?'var(--accent)':'var(--green)'};">${s.raw.r52}%</span>
       </div>
-      ${sbRow('Slope', s.slope, false)}
+      ${sbRow('Slope',s.slope,false)}
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:9px;">
         ${s.raw.r52>=80?'⚠ Near 52W high — limited upside room':s.raw.r52<=25?'✓ Near 52W low — more room to run':'Mid-range — neutral entry zone'}
       </div>
@@ -1330,9 +1312,10 @@ function renderSection(ticker){
 
     html+=`</div>`; // end row 2
 
-    // LEVEL 3
+    // LEVEL 3 — Raw Audit
     if(l3){
-      var rc=rsiColor(s.raw.rsi), rn=rsiNote(s.raw.rsi);
+      var rc=rsiColor(s.raw.rsi),rn=rsiNote(s.raw.rsi);
+      var candleSrc=d.candles?(d.candles.s||'fallback'):'fallback';
       html+=`<div class="row3">
         <div class="audit-hdr">🔬 Raw Audit — ${ticker}
           <span style="font-size:9px;color:var(--text3);font-family:var(--sans);text-transform:none;letter-spacing:0;font-weight:400;margin-left:10px;">
@@ -1355,28 +1338,40 @@ function renderSection(ticker){
             <div class="aval" style="color:${rc};">${s.raw.rsi}</div>
             <div class="aform">${rn}<br>Formula: 100−100/(1+AvgGain/AvgLoss) 14d</div>
           </div>
-          ${aitem('Decay Score',s.decay,'HIGH=momentum fading (trim/avoid). LOW=momentum strong (hold/enter). Color inverted: red=high=bad.','exhaust')}
-          ${aitem('Dist 20DMA',s.raw.d20+'%','Real % distance from 20-day MA. 0-3%=green(at MA). 3-7%=blue. 7-12%=yellow. 12%+=red(overextended). Formula: |Price−MA20|/MA20×100','exhaust')}
-          ${aitem('Slope Score',s.slope,'Linear regression 20d closes. High=steep uptrend. Low=flat/down.','mom')}
+          ${aitem('Decay Score',s.decay,'HIGH=momentum fading. LOW=momentum strong. Color inverted: red=high=bad.','exhaust')}
+          ${aitem('Dist 20DMA',s.raw.d20+'%','Real % distance from 20-day MA. 0-3%=green. 3-7%=blue. 7-12%=yellow. 12%+=red.','exhaust')}
+          ${aitem('Slope Score',s.slope,'Linear regression 20d closes. High=steep uptrend.','mom')}
           ${aitem('MACD Score',s.macd,'(EMA12−EMA26)/price×600+50. High=buyers in control.','mom')}
           ${aitem('PE (TTM)',s.raw.pe,'Finnhub /stock/metric → peTTM','val')}
-          ${aitem('Sector PE Benchmark',s.raw.sectorPE+'×','Expected PE for '+s.raw.industry+'. Score 50 = fairly valued at sector avg.','val')}
+          ${aitem('Sector PE Benchmark',s.raw.sectorPE+'×','Expected PE for '+s.raw.industry+'.','val')}
           ${aitem('EV/EBITDA',s.raw.ev,'Enterprise Value/EBITDA. 15×=fair, 25×=stretched.','val')}
           ${aitem('52W High','$'+s.raw.h52,'Finnhub metric → 52WeekHigh','val')}
           ${aitem('52W Low','$'+s.raw.l52,'Finnhub metric → 52WeekLow','val')}
-          ${aitem('52W Range%',s.raw.r52+'%','Where price sits in its 52W range. HIGH % = near 52W high = limited upside room (red). LOW % = near 52W low = more room to run (green). Formula: (Price−Low)/(High−Low)×100','val')}
-          ${aitem('Analyst Score',s.analyst,'%Buy×100−%Sell×30+30+upside×1.5. N/A if FMP not connected.','analyst')}
-          ${aitem('Price Target Mean','$'+s.raw.ptMean,'FMP /price-target consensus mean','analyst')}
-          ${aitem('Price Target High','$'+s.raw.ptHigh,'FMP /price-target high estimate','analyst')}
-          ${aitem('Price Target Low','$'+s.raw.ptLow,'FMP /price-target low estimate','analyst')}
+          ${aitem('52W Range%',s.raw.r52+'%','Where price sits in its 52W range. HIGH=near 52W high=limited upside (red). LOW=near 52W low=more room (green).','val')}
+          <div class="aitem" style="background:var(--bg3);border-color:var(--border);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+              <div class="albl" style="color:#00e676;">Analyst Score</div>
+              <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#00e676;opacity:.6;">ANALYST</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <div class="aval">${s.analyst}</div>
+              ${analystSourceBadge(s.raw.analystSource)}
+            </div>
+            <div class="aform">Source: ${s.raw.analystSource==='both'?'FMP (recs) + Yahoo (PT+count)':s.raw.analystSource==='yahoo'?'Yahoo Finance quoteSummary (no FMP)':'FMP analyst grades + PT'}<br>
+            ${s.raw.yahooRecKey?'Yahoo rec: '+s.raw.yahooRecKey+' (mean '+s.raw.yahooRecMean.toFixed(1)+', n='+s.raw.yahooNumAnalysts+')':''}</div>
+          </div>
+          ${aitem('Price Target Mean','$'+s.raw.ptMean,'Consensus analyst mean price target','analyst')}
+          ${aitem('Price Target High','$'+s.raw.ptHigh,'High analyst estimate','analyst')}
+          ${aitem('Price Target Low','$'+s.raw.ptLow,'Low analyst estimate','analyst')}
           ${aitem('Analyst Upside',s.analystHasData?(s.analystUpside>0?'+':'')+s.analystUpside.toFixed(1)+'%':'N/A','(targetMean−price)/price×100','analyst')}
-          ${aitem('Rec: Buy',s.raw.recBuy,'FMP analyst strongBuy+buy count','analyst')}
-          ${aitem('Rec: Hold',s.raw.recHold,'FMP analyst hold count','analyst')}
-          ${aitem('Rec: Sell',s.raw.recSell,'FMP analyst strongSell+sell count','analyst')}
+          ${aitem('Rec: Buy',s.raw.recBuy,'strongBuy+buy count','analyst')}
+          ${aitem('Rec: Hold',s.raw.recHold,'hold count','analyst')}
+          ${aitem('Rec: Sell',s.raw.recSell,'strongSell+sell count','analyst')}
+          ${s.raw.yahooNumAnalysts?aitem('Yahoo # Analysts',s.raw.yahooNumAnalysts,'numberOfAnalystOpinions from Yahoo quoteSummary','analyst'):''}
           ${aitem('Block Proxy',s.block,'UpVol/(UpVol+DnVol)×100 over 20 days','smart')}
           ${aitem('Accum Score',s.accum,'(Price>MA20?60:40)+(BlockProxy−50)×0.4','smart')}
-          ${aitem('Vol Ratio',s.volRat+'×','Real ratio: Avg 5d vol ÷ Avg 20d vol. 1.0×=neutral. 2.0×=strong participation. 3.0×+=max. Score normalized: 0.5× floor to 3.0× ceiling.','smart')}
-          ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','FMP /earning_calendar → next date. ⚠ within 14d=caution','context')}
+          ${aitem('Vol Ratio',s.volRat+'×','Avg 5d vol ÷ Avg 20d vol. 1.0×=neutral. 2.0×=strong.','smart')}
+          ${aitem('Next Earnings',s.earn?s.earn.date:'N/A','FMP /earning_calendar → next date','context')}
           ${aitem('Days to Earn',s.earn?s.earn.days+'d':'N/A','Days until next earnings report','context')}
           ${aitem('Insider Net 90d',(s.raw.insiderNet||0).toLocaleString(),'FMP /insider-trading. Purchases−Sales last 90 days.','context')}
           ${aitem('⚡ UW: Net Prem 3D','Pending','Σ(CallPrem−PutPrem) over 3 days','uw')}
@@ -1393,109 +1388,56 @@ function renderSection(ticker){
 }
 
 function toggleL2(t){if(!EXPAND[t])EXPAND[t]={};EXPAND[t].l2=!EXPAND[t].l2;if(!EXPAND[t].l2)EXPAND[t].l3=false;renderTable();}
-
-async function refreshTicker(t, e) {
-  e.stopPropagation(); // prevent row expand/collapse
-  // Clear caches for this ticker only
-  try {
-    localStorage.removeItem('cd_'+t);
-    localStorage.removeItem('fmp_'+t);
-    localStorage.removeItem('fmp_'+t+'_ts');
-  } catch(ex) {}
-  delete DATA[t];
-  DATA[t] = {_loading:true};
-  renderTable();
-  await loadTickerWithRetry(t);
-  renderTable();
-}
 function toggleL3(t){if(!EXPAND[t])EXPAND[t]={};EXPAND[t].l3=!EXPAND[t].l3;renderTable();}
+
+async function refreshTicker(t,e){
+  e.stopPropagation();
+  try{localStorage.removeItem('cd_'+t);localStorage.removeItem('fmp_'+t);localStorage.removeItem('fmp_'+t+'_ts');}catch(ex){}
+  delete DATA[t]; DATA[t]={_loading:true}; renderTable();
+  await loadTickerWithRetry(t); renderTable();
+}
 
 // ── GLOSSARY ──────────────────────────────────────────
 var GL=[
   {sec:'Data Sources',items:[
-    {n:'Finnhub',t:'Free API',s:'context',d:'Live quotes, company profile, PE ratio, EV/EBITDA, 52W high/low, beta. The backbone of all price and fundamental data.',f:'3 calls per ticker per refresh. Free tier at finnhub.io'},
-    {n:'Twelve Data',t:'Free API',s:'context',d:'Real 90-day OHLCV candle history for all US stocks/ETFs. No CORS issues, proper REST API. Powers all momentum calculations when connected.',f:'2 calls per ticker. Free tier at twelvedata.com (800 calls/day)'},
-    {n:'FMP (Financial Modeling Prep)',t:'Free API',s:'context',d:'Analyst ratings, price targets, earnings calendar, insider transactions. Cached for 6 hours so 250 free calls/day stretch across multiple refreshes.',f:'financialmodelingprep.com — free tier, no credit card'},
+    {n:'Finnhub',t:'Free API',d:'Live quotes, company profile, PE ratio, EV/EBITDA, 52W high/low, beta.',f:'3 calls per ticker. Free tier at finnhub.io'},
+    {n:'Twelve Data',t:'Free API',d:'Real 90-day OHLCV candle history. Powers all momentum calculations when connected.',f:'2 calls per ticker. Free at twelvedata.com (800 calls/day)'},
+    {n:'FMP (Financial Modeling Prep)',t:'Free API',d:'Analyst ratings, price targets, earnings calendar, insider transactions. Cached 24hr.',f:'financialmodelingprep.com — free tier'},
+    {n:'Yahoo Finance quoteSummary',t:'Free · No Key',d:'NEW in v6.26. Analyst consensus target (mean/high/low), number of analysts, recommendation mean and key. Auto-fetched via CORS proxy — no API key needed. Supplements FMP or fills in when FMP is rate-limited.',f:'/v11/finance/quoteSummary → financialData module'},
+  ]},
+  {sec:'Analyst Score (v6.26 upgrade)',items:[
+    {n:'Analyst Score',t:'FMP + Yahoo merged',d:'Composite of analyst buy/hold/sell recommendations plus consensus price target upside. v6.26: now merges FMP (primary) and Yahoo Finance quoteSummary (fallback/supplement) for best coverage. Source badge shows: FMP, Yahoo, or FMP+Yahoo.',f:'FMP wins for recommendations. Yahoo fills price target gaps. Score: %Buy×100−%Sell×30+30+upside%×1.5'},
+    {n:'Yahoo Rec Mean',t:'Yahoo Finance',d:'Yahoo\'s single consensus recommendation mean, 1=Strong Buy to 5=Strong Sell, based on all analyst opinions. Used as fallback score when FMP recommendation counts are unavailable. Weighted by number of analysts — 20+ analysts = full confidence.',f:'recommendationMean from Yahoo quoteSummary financialData. Score: 125−(mean×25), weighted by min(n/20,1)'},
   ]},
   {sec:'Composite Scores',items:[
-    {n:'Setup Score',t:'Composite',s:'context',d:'Blended score summarizing overall trade setup quality. Used internally to determine Signal.',f:'Momentum×30% + Valuation×20% + Smart$×20% + Readiness×15% + Analyst×15%'},
-    {n:'Trade Readiness',t:'Execution Timing',s:'context',d:'How close to a clean entry point. HIGH = good timing. LOW = not set up or already extended.',f:'Momentum×40% + (100−52W Range%)×30% + Slope×30%'},
-    {n:'Trade Exhaustion',t:'Risk / Late-Stage',s:'context',d:'HIGH = GET OUT / STAY OUT. Move is overextended, reversal risk elevated. LOW = fresh move with room to run, favorable for entries. Color INVERTED: red=high=danger.',f:'(RSI/100)×40% + Dist 20DMA score×40% + Decay×20%'},
-    {n:'Dist 20DMA',t:'Exhaustion Input',s:'context',d:'Real % distance of price from the 20-day moving average. Near the MA = clean entry zone. Far above = overextended, reversal risk. Color: 🟢 0–3% = at MA, 🔵 3–7% = modest, 🟡 7–12% = stretched, 🔴 12%+ = overextended.',f:'|Price − MA20| / MA20 × 100. Shown as real %. Score for exhaustion formula: pct/15×100'},
-  ]},
-  {sec:'Momentum',items:[
-    {n:'Momentum Quality',t:'Momentum',s:'context',d:'Is the trend clean, persistent, and directional? HIGH = stay in or enter. LOW = weak/broken trend, be cautious.',f:'Slope×30% + RSI Trend×25% + MACD×30% + (100−Decay)×15%'},
-    {n:'Slope Strength',t:'Momentum',s:'context',d:'Angle of price trend over last 20 days from linear regression. High = steep uptrend. Low = flat or declining.',f:'Linear regression slope of 20 closes, normalized 0–100'},
-    {n:'RSI Trend',t:'Momentum',s:'context',d:'Is RSI rising or falling? Rising RSI + rising price = healthy momentum. Falling RSI while price rises = divergence warning. The actual delta is shown in brackets on the dashboard e.g. (Δ+8) means RSI rose 8 points over 10 days.',f:'50 + (RSI now − RSI 10 days ago) × 1.5. Strong: delta > +10. Building: delta +3 to +10. Flat: delta −3 to +3. Weakening: delta < −3.'},
-    {n:'MACD Impulse',t:'Momentum',s:'context',d:'Is the fast MA pulling away from the slow MA? High = buyers in control, momentum building. This is a derived 0–100 score, not a raw MACD value. Score 50 = neutral (MAs converging). Above 50 = bullish divergence. Below 50 = bearish.',f:'Derived score: (EMA12−EMA26)/price normalized to 0–100. ×600 scaling factor converts tiny price ratios to readable 0–100 range.'},
-    {n:'Momentum Decay',t:'Momentum',s:'context',d:'HIGH DECAY = GET OUT / STAY OUT. Move losing steam like a car slowing down. LOW = momentum still building. Color INVERTED: red=high=bad.',f:'5-day move vs 20-day move ratio. >1.1=score 15, >0.8=38, >0.4=62, else=80'},
-    {n:'Momentum Holding',t:'Momentum',s:'context',d:'Inverse of Decay — how well momentum is being sustained. HIGH = good, momentum intact.',f:'100 − Decay Score'},
-  ]},
-  {sec:'Valuation',items:[
-    {n:'Valuation Sanity',t:'Valuation',s:'context',d:'How reasonably priced vs sector peers and market. HIGH = better value. LOW = expensive/stretched.',f:'PE vs Sector×40% + PE vs Market×35% + EV/EBITDA×25%'},
-    {n:'PE vs Sector',t:'Valuation',s:'context',d:'PE ratio compared to the stock\'s own sector benchmark (e.g. Tech=35×, Banks=12×). Score 50 = fairly valued at sector avg. Above = expensive.',f:'100−((PE/SectorBenchmark−0.5)×80)'},
-    {n:'PE vs Market',t:'Valuation',s:'context',d:'PE compared to S&P 500 average (~21×). Gives broad market context.',f:'100−((PE/21−0.5)×70)'},
-    {n:'EV/EBITDA',t:'Valuation',s:'context',d:'Enterprise Value/EBITDA — accounts for debt. 15×=fair, 25×=stretched, 8×=cheap.',f:'100−((EV/EBITDA/15−0.5)×60)'},
-  ]},
-  {sec:'Analyst',items:[
-    {n:'Analyst Score',t:'FMP Data',s:'context',d:'Composite of analyst buy/hold/sell recommendations plus consensus price target upside. Powered by FMP — shows N/A if FMP key not connected.',f:'%Buy×100 − %Sell×30 + 30 + upside%×1.5'},
-    {n:'Price Target Upside',t:'FMP Data',s:'context',d:'How far consensus analyst target is above current price. Positive = analysts expect price to rise.',f:'(ConsensusTarget − Price) / Price × 100'},
-  ]},
-  {sec:'Earnings',items:[
-    {n:'EARN (Days)',t:'Risk Context',s:'context',d:'Days until next earnings report. YELLOW ⚠ = within 14 days (volatility likely). RED ⚠ = within 7 days (high risk — any signal near earnings needs extra caution).',f:'FMP /earning_calendar → days until next report date'},
-  ]},
-  {sec:'Insider Activity',items:[
-    {n:'INSIDER',t:'FMP Data',s:'context',d:'Net shares bought minus sold by executives/directors over last 90 days. Insider BUYING is a high-quality bullish signal. Selling is less meaningful (could be tax/diversification) but notable in size.',f:'FMP /insider-trading → sum Purchases − Sales last 90 days'},
-  ]},
-
-  {sec:'Smart Money (Volume Proxy → Upgraded by UW)',items:[
-    {n:'Smart Money Score',t:'Volume Proxy',s:'context',d:'Currently modeled from volume patterns. Will be upgraded by Unusual Whales real dark pool and block trade data when connected.',f:'Block Proxy×40% + Volume Ratio×35% + Accumulation×25%'},
-    {n:'Block Trade Proxy',t:'Volume Proxy',s:'context',d:'On up-days, was volume heavy? On down-days, was it light? Asymmetric volume = institutional accumulation pattern.',f:'UpVol/(UpVol+DnVol)×100 over 20 days'},
-    {n:'Accumulation Trend',t:'Volume Proxy',s:'context',d:'Is price above 20-day MA with confirming volume? Above MA + heavy up-volume = accumulation mode.',f:'(Price>MA20?60:40)+(BlockProxy−50)×0.4'},
-    {n:'Volume Ratio',t:'Volume Proxy',s:'context',d:'Real ratio of recent vs average volume. Shows as actual multiple e.g. 1.4×. 1.0× = neutral. 2.0×+ = strong rising participation. 0.5× = drying up. Score normalized: 0.5× = 0, 1.0× = 20, 2.0× = 60, 3.0×+ = 100.',f:'Avg 5-day volume ÷ Avg 20-day volume. Score: (ratio−0.5)/2.5×100'},
-  ]},
-  {sec:'CHG%',items:[
-    {n:'CHG%',t:'Price Action',s:'context',d:'Today\'s price change vs yesterday\'s close. Same-day metric only — not weekly or longer.',f:'(Current Price − Previous Close) / Previous Close × 100'},
+    {n:'Trade Readiness',t:'Execution Timing',d:'How close to a clean entry point. HIGH=good timing. LOW=not set up or already extended.',f:'Momentum×40% + (100−52W Range%)×30% + Slope×30%'},
+    {n:'Trade Exhaustion',t:'Risk / Late-Stage',d:'HIGH = GET OUT / STAY OUT. Move is overextended. LOW = fresh move. Color INVERTED: red=high=danger.',f:'(RSI/100)×40% + Dist 20DMA score×40% + Decay×20%'},
   ]},
   {sec:'Signal Logic',items:[
-    {n:'BUY 🟢',t:'Signal',s:'context',d:'Score ≥ +5. Strong alignment across momentum, valuation, smart money, analyst.',f:'Composite score ≥ 5'},
-    {n:'ACCUMULATE 🔵',t:'Signal',s:'context',d:'Score +2 to +4. Setup improving but not all signals aligned. Good for scaling in gradually.',f:'Composite score +2 to +4'},
-    {n:'NEUTRAL ⚪',t:'Signal',s:'context',d:'Score −1 to +1. No clear edge. Wait for confirmation.',f:'Composite score −1 to +1'},
-    {n:'TRIM 🟠',t:'Signal',s:'context',d:'Score −2 to −4. Deteriorating momentum or high exhaustion. Consider reducing position.',f:'Composite score −2 to −4'},
-    {n:'SELL 🔴',t:'Signal',s:'context',d:'Score ≤ −5. Multiple signals deteriorating simultaneously.',f:'Composite score ≤ −5'},
-  ]},
-  {sec:'Unusual Whales (Pre-Wired — Future)',items:[
-    {n:'Net Premium Trend',t:'UW Flow',s:'context',d:'Net call minus put premium 1/3/5 days. Shows institutional directional bias.',f:'Σ(CallPrem−PutPrem) over 3 days'},
-    {n:'Sweep Bias',t:'UW Flow',s:'context',d:'Aggressive ask-side sweep ratio. >0.60=bullish urgency. <0.40=bearish urgency.',f:'Call Sweep Prem ÷ Total Sweep Prem'},
-    {n:'OI Bias',t:'UW Positioning',s:'context',d:'Open interest change in 30–90 day options. Real institutional positioning.',f:'CallOI_Δ − PutOI_Δ (30–90 DTE)'},
-    {n:'Dark Pool Bias',t:'UW Smart Money',s:'context',d:'Off-exchange prints above/below spot. Consistent above-spot buying = institutional accumulation.',f:'Net notional + % prints above spot over 5 days'},
-    {n:'Call Wall Distance',t:'UW Trim Signal',s:'context',d:'Distance to largest call strike cluster. Near call wall = price tends to stall. Strong trim signal.',f:'(CallWall−Spot)/Spot×100. <2%=trim zone'},
-    {n:'IV Context',t:'UW Risk Filter',s:'context',d:'Is IV elevated by an event? Filters out inflated flow signals around earnings/FDA dates.',f:'High if IVRank>60 AND IV>1.3× its 20d average'},
+    {n:'BUY 🟢',t:'Signal',d:'Strong alignment across momentum, valuation, smart money, analyst.',f:'Composite score ≥ 5'},
+    {n:'ACCUMULATE 🔵',t:'Signal',d:'Setup improving but not all signals aligned. Scale in gradually.',f:'Composite score +2 to +4'},
+    {n:'NEUTRAL ⚪',t:'Signal',d:'No clear edge. Wait for confirmation.',f:'Composite score −1 to +1'},
+    {n:'TRIM 🟠',t:'Signal',d:'Deteriorating momentum or high exhaustion. Reduce position.',f:'Composite score −2 to −4'},
+    {n:'SELL 🔴',t:'Signal',d:'Multiple signals deteriorating simultaneously.',f:'Composite score ≤ −5'},
   ]},
 ];
 
 function buildGlossary(){
-  var src={context:'',uw:'<span class="ub">UW</span>'};
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>WI Glossary</title>';
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>WI Glossary v6.26</title>';
   html+='<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">';
-  html+=`<style>
-    body{background:#080c10;color:#c9d5e0;font-family:'DM Sans',sans-serif;padding:28px 32px;max-width:1100px;margin:0 auto;}
+  html+=`<style>body{background:#080c10;color:#c9d5e0;font-family:'DM Sans',sans-serif;padding:28px 32px;max-width:1100px;margin:0 auto;}
     h1{font-family:'Space Mono',monospace;font-size:14px;letter-spacing:.2em;color:#00d4ff;text-transform:uppercase;margin-bottom:6px;}
     .sub{font-size:12px;color:#6a8898;margin-bottom:28px;}
-    .gsec{margin-bottom:26px;}
-    .gsec-t{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#00d4ff;border-bottom:1px solid #1f2d3d;padding-bottom:7px;margin-bottom:11px;}
+    .gsec{margin-bottom:26px;}.gsec-t{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#00d4ff;border-bottom:1px solid #1f2d3d;padding-bottom:7px;margin-bottom:11px;}
     .gitems{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
     .gitem{background:#0d1117;border:1px solid #1f2d3d;border-radius:6px;padding:12px 14px;}
     .gi-name{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:#c9d5e0;margin-bottom:3px;}
     .gi-type{font-size:10px;color:#00d4ff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;}
     .gi-def{font-size:12px;color:#9ab0c0;line-height:1.6;margin-bottom:7px;}
     .gi-form{font-family:'Space Mono',monospace;font-size:10px;color:#6a8898;background:#080c10;padding:6px 9px;border-radius:3px;border-left:2px solid #253445;line-height:1.5;}
-    .fb{display:inline-flex;background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.18);color:#00d4ff;font-family:'Space Mono',monospace;font-size:8px;padding:1px 5px;border-radius:3px;text-transform:uppercase;}
-    .ub{display:inline-flex;background:rgba(124,77,255,.09);border:1px solid rgba(124,77,255,.28);color:#7c4dff;font-family:'Space Mono',monospace;font-size:8px;padding:1px 5px;border-radius:3px;text-transform:uppercase;}
-    @media(max-width:700px){.gitems{grid-template-columns:1fr;}}
-  </style></head><body>`;
+    @media(max-width:700px){.gitems{grid-template-columns:1fr;}}</style></head><body>`;
   html+='<h1>📖 Watchlist Intelligence — Metric Glossary</h1>';
-  html+='<div class="sub">v6.3 · Data sources: Finnhub + Twelve Data + FMP + Unusual Whales (pending)</div>';
+  html+='<div class="sub">v6.26 · Finnhub + Twelve Data + FMP + Yahoo Finance Analyst (free, no key) + Unusual Whales (pending)</div>';
   html+=GL.map(section=>
     `<div class="gsec"><div class="gsec-t">${section.sec}</div><div class="gitems">`+
     section.items.map(it=>
@@ -1507,207 +1449,107 @@ function buildGlossary(){
 }
 
 function openSettings(){
-  var b = document.getElementById('banner');
-  b.style.display = 'block';
-  b.scrollIntoView({behavior:'smooth'});
-  var fk=localStorage.getItem('wi_fh')||'';
-  var tk=localStorage.getItem('wi_td')||'';
-  var mk=localStorage.getItem('wi_fmp')||'';
-  if(fk) document.getElementById('fhKey').value=fk;
-  if(tk) document.getElementById('tdKey').value=tk;
-  if(mk) document.getElementById('fmpKey').value=mk;
+  var b=document.getElementById('banner');b.style.display='block';b.scrollIntoView({behavior:'smooth'});
+  var fk=localStorage.getItem('wi_fh')||'',tk=localStorage.getItem('wi_td')||'',mk=localStorage.getItem('wi_fmp')||'';
+  if(fk)document.getElementById('fhKey').value=fk;
+  if(tk)document.getElementById('tdKey').value=tk;
+  if(mk)document.getElementById('fmpKey').value=mk;
 }
 
 function clearAllCaches(){
-  // Nuclear clear — remove ALL cache keys regardless of format
-  var keys = Object.keys(localStorage).filter(k=>
-    k.startsWith('cd_') || k.startsWith('fmp_') || 
-    k.startsWith('candle_') || k.startsWith('wi_cache') ||
-    k === 'wi_candles'
-  );
-  // Also clear any leftover candle data stored under old formats
-  var allKeys = Object.keys(localStorage);
+  var allKeys=Object.keys(localStorage);
   allKeys.forEach(k=>{
-    if(k.startsWith('cd_')||k.startsWith('fmp_')||k.endsWith('_candles')||k.endsWith('_ts')) {
-      // Only remove cache keys, not API keys
-      if(!k.startsWith('wi_fh')&&!k.startsWith('wi_td')&&!k.startsWith('wi_fmp')&&
-         !k.startsWith('wi_uw')&&k!=='wi_list') {
+    if(k.startsWith('cd_')||k.startsWith('fmp_')||k.endsWith('_candles')||k.endsWith('_ts')){
+      if(!k.startsWith('wi_fh')&&!k.startsWith('wi_td')&&!k.startsWith('wi_fmp')&&!k.startsWith('wi_uw')&&k!=='wi_list')
         localStorage.removeItem(k);
-        keys.push(k);
-      }
     }
   });
-  // Also clear in-memory DATA cache so scores recalculate
-  DATA = {};
+  DATA={};
   document.getElementById('lupd').textContent='Caches cleared — hit Refresh All';
 }
 
-// ── DIAGNOSTIC PANEL ──────────────────────────────────
-function closeDiagnostics(){
-  document.getElementById('diagPanel').style.display='none';
-}
-
 function nuclearReset(){
-  // Save the 5 keys we must preserve
-  var keep = {
-    'wi_fh':  localStorage.getItem('wi_fh')||'',
-    'wi_td':  localStorage.getItem('wi_td')||'',
-    'wi_fmp': localStorage.getItem('wi_fmp')||'',
-    'wi_uw':  localStorage.getItem('wi_uw')||'',
-    'wi_list':localStorage.getItem('wi_list')||'[]'
-  };
-  // Nuke ALL localStorage — including FMP daily limit flags
+  var keep={'wi_fh':localStorage.getItem('wi_fh')||'','wi_td':localStorage.getItem('wi_td')||'',
+    'wi_fmp':localStorage.getItem('wi_fmp')||'','wi_uw':localStorage.getItem('wi_uw')||'',
+    'wi_list':localStorage.getItem('wi_list')||'[]'};
   localStorage.clear();
-  // Restore only the 5 preserved keys
-  Object.keys(keep).forEach(k=>{ if(keep[k]) localStorage.setItem(k, keep[k]); });
-  // Verify clear worked — show in status bar
-  var remaining = Object.keys(localStorage).length;
-  document.getElementById('lupd').textContent =
-    'Hard Reset: cleared all cache ('+remaining+' keys kept). Loading fresh data…';
-  // Reset ALL in-memory state
-  DATA={};
-  FH_KEY=keep['wi_fh']; TD_KEY=keep['wi_td'];
-  FMP_KEY=keep['wi_fmp']; UW_KEY=keep['wi_uw'];
-  WATCHLIST=JSON.parse(keep['wi_list']);
-  renderChips();
-  renderTable();
-  if(FH_KEY) refreshAll();
+  Object.keys(keep).forEach(k=>{if(keep[k])localStorage.setItem(k,keep[k]);});
+  document.getElementById('lupd').textContent='Hard Reset: cleared all cache. Loading fresh data…';
+  DATA={};FH_KEY=keep['wi_fh'];TD_KEY=keep['wi_td'];FMP_KEY=keep['wi_fmp'];UW_KEY=keep['wi_uw'];
+  WATCHLIST=JSON.parse(keep['wi_list']);renderChips();renderTable();if(FH_KEY)refreshAll();
 }
 
-async function runDiagnostics() {
-  var d = document.getElementById('diagPanel');
-  d.style.display = 'block';
-  d.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--accent);padding:12px;">Running diagnostics…</div>';
-  var lines = [];
-  var render = () => {
-    d.innerHTML = '<div style="padding:12px;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
-      +'<div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em;">🔬 DIAGNOSTICS</div>'
+function closeDiagnostics(){document.getElementById('diagPanel').style.display='none';}
+
+async function runDiagnostics(){
+  var d=document.getElementById('diagPanel');d.style.display='block';
+  d.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--accent);padding:12px;">Running diagnostics…</div>';
+  var lines=[];
+  var render=()=>{
+    d.innerHTML='<div style="padding:12px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
+      +'<div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em;">🔬 DIAGNOSTICS v6.26</div>'
       +'<button onclick="closeDiagnostics()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;">✕ Close</button>'
-      +'</div>'
-      + lines.join('') + '</div>';
+      +'</div>'+lines.join('')+'</div>';
   };
-  var add = (label, status, detail) => {
-    var col = status==='OK'?'var(--green)':status==='FAIL'?'var(--red)':'var(--yellow)';
+  var add=(label,status,detail)=>{
+    var col=status==='OK'?'var(--green)':status==='FAIL'?'var(--red)':'var(--yellow)';
     lines.push('<div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid var(--border);">'
-      +'<span style="font-family:var(--mono);font-size:10px;color:var(--text2);width:220px;flex-shrink:0;">'+label+'</span>'
+      +'<span style="font-family:var(--mono);font-size:10px;color:var(--text2);width:240px;flex-shrink:0;">'+label+'</span>'
       +'<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:'+col+';width:40px;flex-shrink:0;">'+status+'</span>'
       +'<span style="font-family:var(--mono);font-size:10px;color:var(--text3);">'+detail+'</span>'
       +'</div>');
     render();
   };
 
-  // Test 1: Finnhub
+  // Test Finnhub
   try {
-    var t1 = await fhGet('/quote?symbol=AAPL');
-    add('Finnhub /quote AAPL', 'OK', 'price=$'+t1.c+' key='+FH_KEY.substring(0,6)+'…');
-  } catch(e) { add('Finnhub /quote AAPL', 'FAIL', e.message); }
+    var t1=await fhGet('/quote?symbol=AAPL');
+    add('Finnhub /quote AAPL','OK','price=$'+t1.c+' key='+FH_KEY.substring(0,6)+'…');
+  } catch(e){add('Finnhub /quote AAPL','FAIL',e.message);}
 
-  // Test 2: FMP grades-summary
-  if(FMP_KEY) {
-    try {
-      var t2 = await fetch('https://financialmodelingprep.com/stable/upgrades-downgrades-consensus?symbol=AAPL&apikey='+FMP_KEY);
-      var d2 = await t2.json();
-      if(d2&&d2['Error Message']) throw new Error(d2['Error Message']);
-      var g2 = Array.isArray(d2)?d2[0]:d2;
-      add('FMP /stable/upgrades-downgrades-consensus AAPL', t2.ok?'OK':'FAIL',
-        t2.ok ? 'strongBuy='+(g2&&g2.strongBuy||0)+' buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0)+' data='+JSON.stringify(g2).substring(0,60) : 'HTTP '+t2.status);
-    } catch(e) { add('FMP /stable/upgrades-downgrades-consensus AAPL', 'FAIL', e.message); }
-
-    // Test 3: FMP price-target-summary
-    try {
-      var t3 = await fetch('https://financialmodelingprep.com/stable/price-target-summary?symbol=AAPL&apikey='+FMP_KEY);
-      var d3 = await t3.json();
-      if(d3&&d3['Error Message']) throw new Error(d3['Error Message']);
-      var pt = Array.isArray(d3)?d3[0]:d3;
-      add('FMP /stable/price-target-summary AAPL', t3.ok?'OK':'FAIL',
-        t3.ok ? 'data='+JSON.stringify(pt).substring(0,80) : 'HTTP '+t3.status);
-    } catch(e) { add('FMP /stable/price-target-summary AAPL', 'FAIL', e.message); }
-
-    // Test 4: FMP earnings-calendar
-    try {
-      var t4 = await fetch('https://financialmodelingprep.com/stable/earnings-calendar?symbol=AAPL&apikey='+FMP_KEY);
-      var d4 = await t4.json();
-      if(d4&&d4['Error Message']) throw new Error(d4['Error Message']);
-      add('FMP /stable/earnings-calendar AAPL', t4.ok?'OK':'FAIL',
-        t4.ok ? 'records='+(Array.isArray(d4)?d4.length:0)+' sample='+(d4[0]?d4[0].date:'none') : 'HTTP '+t4.status);
-    } catch(e) { add('FMP /stable/earnings-calendar AAPL', 'FAIL', e.message); }
-
-    // Test 5: FMP insider-trading (v4)
-    try {
-      var t5 = await fetch('https://financialmodelingprep.com/stable/insider-trading?symbol=AAPL&limit=5&apikey='+FMP_KEY);
-      var d5 = await t5.json();
-      if(d5&&d5['Error Message']) throw new Error(d5['Error Message']);
-      add('FMP /stable/insider-trading AAPL', t5.ok?'OK':'FAIL',
-        t5.ok ? 'records='+(Array.isArray(d5)?d5.length:0) : 'HTTP '+t5.status);
-    } catch(e) { add('FMP /stable/insider-trading AAPL', 'FAIL', e.message); }
-  } else {
-    add('FMP', 'SKIP', 'No FMP key saved');
-  }
-
-  // Test 6: Twelve Data candles
-  if(TD_KEY) {
-    try {
-      var t6 = await fetch('https://api.twelvedata.com/time_series?symbol=AAPL&interval=1day&outputsize=5&format=JSON&apikey='+TD_KEY);
-      var d6 = await t6.json();
-      if(d6.status==='error') throw new Error(d6.message);
-      add('TwelveData /time_series AAPL', 'OK', 'values='+(d6.values?d6.values.length:0));
-    } catch(e) { add('TwelveData /time_series AAPL', 'FAIL', e.message); }
-  } else {
-    add('TwelveData', 'SKIP', 'No TD key saved');
-  }
-
-  // Test 7: Yahoo via allorigins
+  // Test Yahoo Analyst (NEW)
   try {
-    var end=Math.floor(Date.now()/1000), start=end-10*86400;
+    var ya=await yahooAnalyst('AAPL');
+    if(ya) add('Yahoo quoteSummary AAPL (v6.26 NEW)','OK',
+      'PT=$'+ya.ptMean.toFixed(2)+' rec='+ya.recKey+' n='+ya.numAnalysts);
+    else add('Yahoo quoteSummary AAPL (v6.26 NEW)','FAIL','No data returned');
+  } catch(e){add('Yahoo quoteSummary AAPL (v6.26 NEW)','FAIL',e.message);}
+
+  // Test FMP
+  if(FMP_KEY){
+    try{
+      var t2=await fetch('https://financialmodelingprep.com/stable/upgrades-downgrades-consensus?symbol=AAPL&apikey='+FMP_KEY);
+      var d2=await t2.json();if(d2&&d2['Error Message'])throw new Error(d2['Error Message']);
+      var g2=Array.isArray(d2)?d2[0]:d2;
+      add('FMP /upgrades-downgrades-consensus',t2.ok?'OK':'FAIL',t2.ok?'buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0):'HTTP '+t2.status);
+    }catch(e){add('FMP consensus','FAIL',e.message);}
+    try{
+      var t4=await fetch('https://financialmodelingprep.com/stable/earnings-calendar?symbol=AAPL&apikey='+FMP_KEY);
+      var d4=await t4.json();
+      add('FMP /earnings-calendar AAPL',t4.ok?'OK':'FAIL',t4.ok?'records='+(Array.isArray(d4)?d4.length:0):'HTTP '+t4.status);
+    }catch(e){add('FMP earnings-calendar','FAIL',e.message);}
+  }else{add('FMP','SKIP','No FMP key saved');}
+
+  // Test TwelveData
+  if(TD_KEY){
+    try{
+      var t6=await fetch('https://api.twelvedata.com/time_series?symbol=AAPL&interval=1day&outputsize=5&format=JSON&apikey='+TD_KEY);
+      var d6=await t6.json();if(d6.status==='error')throw new Error(d6.message);
+      add('TwelveData /time_series AAPL','OK','values='+(d6.values?d6.values.length:0));
+    }catch(e){add('TwelveData /time_series AAPL','FAIL',e.message);}
+  }else{add('TwelveData','SKIP','No TD key saved');}
+
+  // Test Yahoo candle proxies
+  try{
+    var end=Math.floor(Date.now()/1000),start=end-10*86400;
     var yUrl='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start+'&period2='+end;
-    var t7 = await fetchWithTimeout('https://api.allorigins.win/get?url='+encodeURIComponent(yUrl), 9000);
-    var w7 = await t7.json();
-    var p7 = w7.contents ? JSON.parse(w7.contents) : null;
-    var ok7 = p7&&p7.chart&&p7.chart.result&&p7.chart.result[0];
-    add('Yahoo via allorigins AAPL', ok7?'OK':'FAIL', ok7?'closes='+p7.chart.result[0].indicators.quote[0].close.length:'no result');
-  } catch(e) { add('Yahoo via allorigins AAPL', 'FAIL', e.message); }
+    var t7=await fetchWithTimeout('https://api.allorigins.win/get?url='+encodeURIComponent(yUrl),9000);
+    var w7=await t7.json();var p7=w7.contents?JSON.parse(w7.contents):null;
+    var ok7=p7&&p7.chart&&p7.chart.result&&p7.chart.result[0];
+    add('Yahoo candles via allorigins',ok7?'OK':'FAIL',ok7?'closes='+p7.chart.result[0].indicators.quote[0].close.length:'no result');
+  }catch(e){add('Yahoo candles via allorigins','FAIL',e.message);}
 
-  // Test 8: Yahoo via corsproxy
-  try {
-    var end2=Math.floor(Date.now()/1000), start2=end2-10*86400;
-    var yUrl2='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start2+'&period2='+end2;
-    var t8 = await fetchWithTimeout('https://corsproxy.io/?url='+encodeURIComponent(yUrl2), 9000);
-    var w8 = await t8.json();
-    var ok8 = w8&&w8.chart&&w8.chart.result&&w8.chart.result[0];
-    add('Yahoo via corsproxy AAPL', ok8?'OK':'FAIL', ok8?'closes='+w8.chart.result[0].indicators.quote[0].close.length:'HTTP '+t8.status);
-  } catch(e) { add('Yahoo via corsproxy AAPL', 'FAIL', e.message); }
-
-  // Test 9: Yahoo via thingproxy
-  try {
-    var end3=Math.floor(Date.now()/1000), start3=end3-10*86400;
-    var yUrl3='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1='+start3+'&period2='+end3;
-    var t9 = await fetchWithTimeout('https://thingproxy.freeboard.io/fetch/'+yUrl3, 9000);
-    var w9 = await t9.json();
-    var ok9 = w9&&w9.chart&&w9.chart.result&&w9.chart.result[0];
-    add('Yahoo via thingproxy AAPL', ok9?'OK':'FAIL', ok9?'closes='+w9.chart.result[0].indicators.quote[0].close.length:'HTTP '+t9.status);
-  } catch(e) { add('Yahoo via thingproxy AAPL', 'FAIL', e.message); }
-
-  // Test 10: ORCL candles specifically — check what TD actually returns
-  if(TD_KEY) {
-    try {
-      var end10 = new Date().toISOString().split('T')[0];
-      var start10 = new Date(Date.now()-20*86400000).toISOString().split('T')[0];
-      var t10 = await fetch('https://api.twelvedata.com/time_series?symbol=ORCL&interval=1day&outputsize=20&format=JSON&apikey='+TD_KEY);
-      var d10 = await t10.json();
-      if(d10.status==='error') throw new Error(d10.message);
-      var vals10 = d10.values||[];
-      var closes10 = vals10.slice().reverse().map(v=>parseFloat(v.close));
-      // Calculate RSI on the spot
-      var rsi10 = closes10.length>=16 ? calcRSI(closes10, 14) : 'need more data';
-      var lastClose = closes10.length ? closes10[closes10.length-1].toFixed(2) : 'N/A';
-      add('ORCL TD candles + RSI check', 'OK',
-        'bars='+vals10.length+' lastClose=$'+lastClose+' RSI(14)='+rsi10+
-        ' first='+closes10[0]?.toFixed(2)+' last='+closes10[closes10.length-1]?.toFixed(2));
-    } catch(e) { add('ORCL TD candles + RSI check', 'FAIL', e.message); }
-  }
-
-  add('─── Complete ───', '✓', 'Share these results to diagnose issues');
+  add('─── Complete ───','✓','Share these results to diagnose issues');
 }
 
 function openGL(){
