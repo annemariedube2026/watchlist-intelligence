@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Watchlist Intelligence</title>
+<title>Watchlist Intelligence v6.27</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -186,7 +186,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.26 · Multi-Source · Yahoo Analyst · GitHub Pages</div>
+      <div class="logo-sub">v6.27 · Multi-Source · Yahoo Analyst Fixed · GitHub Pages</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -412,65 +412,101 @@ async function yahooCandles(ticker) {
   throw new Error('Yahoo candles: all proxies failed for '+ticker);
 }
 
-// ── YAHOO ANALYST: quoteSummary ────────────────────────
-// Free — no API key needed. Uses same CORS proxies as candles.
+// ── YAHOO ANALYST: multi-endpoint cascade ─────────────
+// v11 quoteSummary is geo-blocked through CORS proxies.
+// We cascade through v7/quote (simplest), v6/quoteSummary, v10/quoteSummary.
 // Returns: { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' }
 // recMean scale: 1=Strong Buy, 2=Buy, 3=Hold, 4=Sell, 5=Strong Sell
 async function yahooAnalyst(ticker) {
-  var modules = 'financialData,recommendationTrend';
-  var yahooUrl  = 'https://query1.finance.yahoo.com/v11/finance/quoteSummary/'+ticker+'?modules='+modules;
-  var yahooUrl2 = 'https://query2.finance.yahoo.com/v11/finance/quoteSummary/'+ticker+'?modules='+modules;
+  // Strategy A: v7/finance/quote — returns flat fields, less blocked
+  var v7url  = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols='+ticker
+    +'&fields=targetMeanPrice,targetHighPrice,targetLowPrice,numberOfAnalystOpinions,recommendationMean,recommendationKey';
+  var v7url2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols='+ticker
+    +'&fields=targetMeanPrice,targetHighPrice,targetLowPrice,numberOfAnalystOpinions,recommendationMean,recommendationKey';
+
+  // Strategy B: v6/quoteSummary — older API, sometimes unblocked
+  var v6url  = 'https://query1.finance.yahoo.com/v6/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
+  var v6url2 = 'https://query2.finance.yahoo.com/v6/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
+
+  // Strategy C: v10/quoteSummary
+  var v10url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
+
+  var proxies = ['https://api.allorigins.win/get?url=', 'https://corsproxy.io/?url='];
+
   var attempts = [
-    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl),  wrap:'allorigins'},
-    {url:'https://api.allorigins.win/get?url='+encodeURIComponent(yahooUrl2), wrap:'allorigins'},
-    {url:'https://corsproxy.io/?url='+encodeURIComponent(yahooUrl),            wrap:'direct'},
+    // v7 via allorigins (most likely to work — simpler endpoint)
+    {target: v7url,  proxy: proxies[0], wrap:'allorigins', parse:'v7'},
+    {target: v7url2, proxy: proxies[0], wrap:'allorigins', parse:'v7'},
+    // v6 via allorigins
+    {target: v6url,  proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
+    {target: v6url2, proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
+    // v10 via allorigins
+    {target: v10url, proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
+    // v7 via corsproxy fallback
+    {target: v7url,  proxy: proxies[1], wrap:'direct', parse:'v7'},
   ];
+
   for (var i=0; i<attempts.length; i++) {
+    var a = attempts[i];
     try {
-      var r = await fetchWithTimeout(attempts[i].url, 6000);
-      if (!r.ok) continue;
+      var url = a.proxy + encodeURIComponent(a.target);
+      var r = await fetchWithTimeout(url, 7000);
+      if (!r.ok) { console.warn('Yahoo analyst attempt '+i+' HTTP '+r.status); continue; }
       var wrapper = await r.json();
-      var data;
-      if (attempts[i].wrap === 'allorigins') {
+
+      var raw;
+      if (a.wrap === 'allorigins') {
         if (!wrapper.contents) continue;
-        try { data = JSON.parse(wrapper.contents); } catch(e) { continue; }
+        try { raw = JSON.parse(wrapper.contents); } catch(e) { continue; }
       } else {
-        data = wrapper;
-      }
-      var result = data && data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];
-      if (!result) continue;
-
-      var fd = result.financialData || {};
-      var rt = result.recommendationTrend || {};
-
-      var ptMean      = fd.targetMeanPrice      && fd.targetMeanPrice.raw      ? fd.targetMeanPrice.raw      : 0;
-      var ptHigh      = fd.targetHighPrice      && fd.targetHighPrice.raw      ? fd.targetHighPrice.raw      : 0;
-      var ptLow       = fd.targetLowPrice       && fd.targetLowPrice.raw       ? fd.targetLowPrice.raw       : 0;
-      var numAnalysts = fd.numberOfAnalystOpinions && fd.numberOfAnalystOpinions.raw ? fd.numberOfAnalystOpinions.raw : 0;
-      var recMean     = fd.recommendationMean   && fd.recommendationMean.raw   ? fd.recommendationMean.raw   : 0;
-      var recKey      = fd.recommendationKey || '';
-
-      // Most recent month trend counts
-      var trend = {};
-      if (rt.trend && rt.trend.length > 0) {
-        var t0 = rt.trend[0];
-        trend = { strongBuy: t0.strongBuy||0, buy: t0.buy||0, hold: t0.hold||0, sell: t0.sell||0, strongSell: t0.strongSell||0 };
+        raw = wrapper;
       }
 
-      if (!ptMean && !recMean) continue;
+      var ptMean=0, ptHigh=0, ptLow=0, numAnalysts=0, recMean=0, recKey='', trend={};
 
-      // Update header dot
+      if (a.parse === 'v7') {
+        // v7 returns: { quoteResponse: { result: [ { targetMeanPrice, recommendationMean, ... } ] } }
+        var qr = raw && raw.quoteResponse && raw.quoteResponse.result;
+        if (!qr || !qr.length) { console.warn('Yahoo v7 empty result attempt '+i); continue; }
+        var q = qr[0];
+        ptMean      = q.targetMeanPrice || 0;
+        ptHigh      = q.targetHighPrice || 0;
+        ptLow       = q.targetLowPrice  || 0;
+        numAnalysts = q.numberOfAnalystOpinions || 0;
+        recMean     = q.recommendationMean || 0;
+        recKey      = q.recommendationKey  || '';
+      } else {
+        // quoteSummary format
+        var result = raw && raw.quoteSummary && raw.quoteSummary.result && raw.quoteSummary.result[0];
+        if (!result) { console.warn('Yahoo quoteSummary empty attempt '+i); continue; }
+        var fd = result.financialData || {};
+        var rt = result.recommendationTrend || {};
+        ptMean      = fd.targetMeanPrice      && fd.targetMeanPrice.raw      ? fd.targetMeanPrice.raw      : 0;
+        ptHigh      = fd.targetHighPrice      && fd.targetHighPrice.raw      ? fd.targetHighPrice.raw      : 0;
+        ptLow       = fd.targetLowPrice       && fd.targetLowPrice.raw       ? fd.targetLowPrice.raw       : 0;
+        numAnalysts = fd.numberOfAnalystOpinions && fd.numberOfAnalystOpinions.raw ? fd.numberOfAnalystOpinions.raw : 0;
+        recMean     = fd.recommendationMean   && fd.recommendationMean.raw   ? fd.recommendationMean.raw   : 0;
+        recKey      = fd.recommendationKey || '';
+        if (rt.trend && rt.trend.length > 0) {
+          var t0 = rt.trend[0];
+          trend = { strongBuy:t0.strongBuy||0, buy:t0.buy||0, hold:t0.hold||0, sell:t0.sell||0, strongSell:t0.strongSell||0 };
+        }
+      }
+
+      if (!ptMean && !recMean) { console.warn('Yahoo analyst attempt '+i+' returned no useful data'); continue; }
+
       var yd=document.getElementById('yhaDot'), yt=document.getElementById('yhaTxt');
-      if(yd){yd.className='dot on';}
+      if(yd) yd.className='dot on';
       if(yt) yt.textContent='YH Analyst: Live';
 
-      console.log(ticker+' Yahoo analyst OK: PT=$'+ptMean.toFixed(2)+' rec='+recKey+' n='+numAnalysts);
+      console.log(ticker+' Yahoo analyst OK (attempt '+i+'): PT=$'+ptMean+' rec='+recKey+' n='+numAnalysts);
       return { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' };
     } catch(e) {
-      console.warn(ticker+' Yahoo analyst proxy '+i+' failed: '+e.message);
+      console.warn(ticker+' Yahoo analyst attempt '+i+' failed: '+e.message);
       continue;
     }
   }
+  console.warn(ticker+' Yahoo analyst: all endpoints failed');
   return null;
 }
 
@@ -594,16 +630,20 @@ async function fmpFundamentals(ticker) {
 
   var fmpDelay=()=>new Promise(r=>setTimeout(r,350));
   try {
-    var gradesSummary=await fmpGet('/upgrades-downgrades-consensus?symbol='+ticker).catch(e=>{
+    // FMP analyst grades — /ratings-snapshot is the correct stable endpoint (replaced /upgrades-downgrades-consensus)
+    // Falls back to /upgrades-downgrades (individual recent actions) if snapshot returns nothing
+    var gradesSummary=await fmpGet('/ratings-snapshot?symbol='+ticker).catch(e=>{
       if(e.message&&(e.message.includes('Limit')||e.message.includes('429'))) throw e;
       return null;
     });
     await fmpDelay();
 
     var grades=[];
-    if(!gradesSummary||(!(gradesSummary.strongBuy)&&!(gradesSummary.buy)&&!(gradesSummary.hold)
-       &&!(Array.isArray(gradesSummary)&&gradesSummary.length))) {
-      grades=await fmpGet('/upgrades-downgrades?symbol='+ticker+'&limit=10').catch(()=>[]);
+    // ratings-snapshot returns: {ratingBuy, ratingOverweight, ratingHold, ratingUnderweight, ratingSell, ...}
+    var hasSnapshot = gradesSummary && (gradesSummary.ratingBuy>0 || gradesSummary.ratingHold>0 || gradesSummary.ratingSell>0
+      || gradesSummary.ratingOverweight>0 || gradesSummary.ratingUnderweight>0);
+    if(!hasSnapshot) {
+      grades=await fmpGet('/upgrades-downgrades?symbol='+ticker+'&limit=15').catch(()=>[]);
       await fmpDelay();
     }
 
@@ -634,13 +674,16 @@ async function fmpFundamentals(ticker) {
 
     var recTrend=[];
     try {
-      var gs=Array.isArray(gradesSummary)?gradesSummary[0]:gradesSummary;
-      if(gs&&(gs.strongBuy||gs.buy||gs.hold||gs.sell||gs.strongSell)) {
-        recTrend=[{strongBuy:gs.strongBuy||0,buy:gs.buy||0,hold:gs.hold||0,sell:gs.sell||0,strongSell:gs.strongSell||0}];
+      if(hasSnapshot && gradesSummary) {
+        // /ratings-snapshot format: ratingBuy, ratingOverweight, ratingHold, ratingUnderweight, ratingSell, ratingStrongBuy, ratingStrongSell
+        var gs=gradesSummary;
+        var sb=(gs.ratingStrongBuy||0), b=(gs.ratingBuy||0)+(gs.ratingOverweight||0),
+            h=(gs.ratingHold||0), s=(gs.ratingSell||0)+(gs.ratingUnderweight||0), ss=(gs.ratingStrongSell||0);
+        if(sb+b+h+s+ss>0) recTrend=[{strongBuy:sb,buy:b,hold:h,sell:s,strongSell:ss}];
       } else if(grades&&grades.length) {
         var sb=0,b=0,h=0,s=0,ss=0;
-        grades.slice(0,10).forEach(g=>{
-          var act=(g.newGrade||g.action||g.rating||'').toLowerCase();
+        grades.slice(0,15).forEach(g=>{
+          var act=(g.newGrade||g.action||g.rating||g.gradingCompany||'').toLowerCase();
           if(act.includes('strong buy')||act.includes('outperform')||act.includes('overweight')||act.includes('top pick')) sb++;
           else if(act.includes('buy')||act.includes('positive')||act.includes('accumulate')) b++;
           else if(act.includes('hold')||act.includes('neutral')||act.includes('market perform')||act.includes('equal')) h++;
@@ -1403,7 +1446,7 @@ var GL=[
     {n:'Finnhub',t:'Free API',d:'Live quotes, company profile, PE ratio, EV/EBITDA, 52W high/low, beta.',f:'3 calls per ticker. Free tier at finnhub.io'},
     {n:'Twelve Data',t:'Free API',d:'Real 90-day OHLCV candle history. Powers all momentum calculations when connected.',f:'2 calls per ticker. Free at twelvedata.com (800 calls/day)'},
     {n:'FMP (Financial Modeling Prep)',t:'Free API',d:'Analyst ratings, price targets, earnings calendar, insider transactions. Cached 24hr.',f:'financialmodelingprep.com — free tier'},
-    {n:'Yahoo Finance quoteSummary',t:'Free · No Key',d:'NEW in v6.26. Analyst consensus target (mean/high/low), number of analysts, recommendation mean and key. Auto-fetched via CORS proxy — no API key needed. Supplements FMP or fills in when FMP is rate-limited.',f:'/v11/finance/quoteSummary → financialData module'},
+    {n:'Yahoo Finance quoteSummary',t:'Free · No Key',d:'v6.27: Multi-endpoint cascade (v7/quote → v6/quoteSummary → v10) via CORS proxy. No API key needed. Returns consensus PT (mean/high/low), analyst count, recommendation mean (1=Strong Buy→5=Strong Sell). Supplements FMP or fills gaps when FMP is rate-limited.',f:'/v7/finance/quote (primary) → /v6/quoteSummary (fallback). No API key needed.'},
   ]},
   {sec:'Analyst Score (v6.26 upgrade)',items:[
     {n:'Analyst Score',t:'FMP + Yahoo merged',d:'Composite of analyst buy/hold/sell recommendations plus consensus price target upside. v6.26: now merges FMP (primary) and Yahoo Finance quoteSummary (fallback/supplement) for best coverage. Source badge shows: FMP, Yahoo, or FMP+Yahoo.',f:'FMP wins for recommendations. Yahoo fills price target gaps. Score: %Buy×100−%Sell×30+30+upside%×1.5'},
@@ -1518,10 +1561,10 @@ async function runDiagnostics(){
   // Test FMP
   if(FMP_KEY){
     try{
-      var t2=await fetch('https://financialmodelingprep.com/stable/upgrades-downgrades-consensus?symbol=AAPL&apikey='+FMP_KEY);
+      var t2=await fetch('https://financialmodelingprep.com/stable/ratings-snapshot?symbol=AAPL&apikey='+FMP_KEY);
       var d2=await t2.json();if(d2&&d2['Error Message'])throw new Error(d2['Error Message']);
       var g2=Array.isArray(d2)?d2[0]:d2;
-      add('FMP /upgrades-downgrades-consensus',t2.ok?'OK':'FAIL',t2.ok?'buy='+(g2&&g2.buy||0)+' hold='+(g2&&g2.hold||0):'HTTP '+t2.status);
+      add('FMP /ratings-snapshot',t2.ok?'OK':'FAIL',t2.ok?'ratingBuy='+(g2&&(g2.ratingBuy||0))+' ratingHold='+(g2&&(g2.ratingHold||0)):'HTTP '+t2.status);
     }catch(e){add('FMP consensus','FAIL',e.message);}
     try{
       var t4=await fetch('https://financialmodelingprep.com/stable/earnings-calendar?symbol=AAPL&apikey='+FMP_KEY);
