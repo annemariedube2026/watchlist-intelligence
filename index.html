@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Watchlist Intelligence v6.27</title>
+<title>Watchlist Intelligence v6.29</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -186,7 +186,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="logo-icon">WI</div>
     <div>
       <div class="logo-text">Watchlist Intelligence</div>
-      <div class="logo-sub">v6.27 · Multi-Source · Yahoo Analyst Fixed · GitHub Pages</div>
+      <div class="logo-sub">v6.29 · Morning Brief · AI-Powered Scan</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -218,6 +218,10 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
     <div class="api-field">
       <label>Unusual Whales <span class="ub">Future</span></label>
       <input type="password" id="uwKey" placeholder="Pre-wired — paste when ready"/>
+    </div>
+    <div class="api-field">
+      <label>Claude API Key <span class="fb">Morning Brief</span></label>
+      <input type="password" id="claudeKey" placeholder="sk-ant-… → console.anthropic.com" autocomplete="off" spellcheck="false"/>
     </div>
   </div>
   <div class="api-row-btn">
@@ -273,9 +277,15 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
   <button class="btn-ref" onclick="nuclearReset()" title="Hard reset — clears everything including in-memory data" style="color:var(--red);border-color:var(--red);">
     ⚡ Hard Reset
   </button>
+  <button class="btn-ref" onclick="generateMorningBrief()" id="briefBtn"
+    style="background:linear-gradient(135deg,rgba(0,212,255,.12),rgba(124,77,255,.08));border-color:var(--accent);color:var(--accent);font-weight:700;">
+    ☀ Morning Brief
+  </button>
   <span class="lupd" id="lupd"></span>
   <span id="progTxt" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
 </div>
+
+<div id="briefPanel" style="display:none;margin:0 20px 12px;"></div>
 
 <div id="diagPanel" style="display:none;margin:0 20px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;max-height:400px;overflow-y:auto;"></div>
 
@@ -309,7 +319,7 @@ header{background:linear-gradient(180deg,#0a1520,transparent);border-bottom:1px 
 
 <script>
 // ── STATE ──────────────────────────────────────────────
-var FH_KEY='', TD_KEY='', FMP_KEY='', UW_KEY='';
+var FH_KEY='', TD_KEY='', FMP_KEY='', UW_KEY='', CLAUDE_KEY='';
 var WATCHLIST=[], DATA={}, EXPAND={};
 var SORT_COL='', SORT_DIR=1;
 var FMP_CACHE={}, FMP_CACHE_TS={};
@@ -412,102 +422,43 @@ async function yahooCandles(ticker) {
   throw new Error('Yahoo candles: all proxies failed for '+ticker);
 }
 
-// ── YAHOO ANALYST: multi-endpoint cascade ─────────────
-// v11 quoteSummary is geo-blocked through CORS proxies.
-// We cascade through v7/quote (simplest), v6/quoteSummary, v10/quoteSummary.
-// Returns: { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' }
-// recMean scale: 1=Strong Buy, 2=Buy, 3=Hold, 4=Sell, 5=Strong Sell
+// ── YAHOO ANALYST: fast single-shot, non-blocking ─────
+// Tries one endpoint only — fails fast (3s timeout) so it never slows down load.
+// Called fire-and-forget from loadTickerCore so price/momentum loads instantly.
+// Returns: { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, source:'yahoo' }
 async function yahooAnalyst(ticker) {
-  // Strategy A: v7/finance/quote — returns flat fields, less blocked
-  var v7url  = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols='+ticker
-    +'&fields=targetMeanPrice,targetHighPrice,targetLowPrice,numberOfAnalystOpinions,recommendationMean,recommendationKey';
-  var v7url2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols='+ticker
-    +'&fields=targetMeanPrice,targetHighPrice,targetLowPrice,numberOfAnalystOpinions,recommendationMean,recommendationKey';
-
-  // Strategy B: v6/quoteSummary — older API, sometimes unblocked
-  var v6url  = 'https://query1.finance.yahoo.com/v6/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
-  var v6url2 = 'https://query2.finance.yahoo.com/v6/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
-
-  // Strategy C: v10/quoteSummary
-  var v10url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+ticker+'?modules=financialData%2CrecommendationTrend';
-
-  var proxies = ['https://api.allorigins.win/get?url=', 'https://corsproxy.io/?url='];
-
-  var attempts = [
-    // v7 via allorigins (most likely to work — simpler endpoint)
-    {target: v7url,  proxy: proxies[0], wrap:'allorigins', parse:'v7'},
-    {target: v7url2, proxy: proxies[0], wrap:'allorigins', parse:'v7'},
-    // v6 via allorigins
-    {target: v6url,  proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
-    {target: v6url2, proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
-    // v10 via allorigins
-    {target: v10url, proxy: proxies[0], wrap:'allorigins', parse:'quoteSummary'},
-    // v7 via corsproxy fallback
-    {target: v7url,  proxy: proxies[1], wrap:'direct', parse:'v7'},
-  ];
-
-  for (var i=0; i<attempts.length; i++) {
-    var a = attempts[i];
-    try {
-      var url = a.proxy + encodeURIComponent(a.target);
-      var r = await fetchWithTimeout(url, 7000);
-      if (!r.ok) { console.warn('Yahoo analyst attempt '+i+' HTTP '+r.status); continue; }
-      var wrapper = await r.json();
-
-      var raw;
-      if (a.wrap === 'allorigins') {
-        if (!wrapper.contents) continue;
-        try { raw = JSON.parse(wrapper.contents); } catch(e) { continue; }
-      } else {
-        raw = wrapper;
-      }
-
-      var ptMean=0, ptHigh=0, ptLow=0, numAnalysts=0, recMean=0, recKey='', trend={};
-
-      if (a.parse === 'v7') {
-        // v7 returns: { quoteResponse: { result: [ { targetMeanPrice, recommendationMean, ... } ] } }
-        var qr = raw && raw.quoteResponse && raw.quoteResponse.result;
-        if (!qr || !qr.length) { console.warn('Yahoo v7 empty result attempt '+i); continue; }
-        var q = qr[0];
-        ptMean      = q.targetMeanPrice || 0;
-        ptHigh      = q.targetHighPrice || 0;
-        ptLow       = q.targetLowPrice  || 0;
-        numAnalysts = q.numberOfAnalystOpinions || 0;
-        recMean     = q.recommendationMean || 0;
-        recKey      = q.recommendationKey  || '';
-      } else {
-        // quoteSummary format
-        var result = raw && raw.quoteSummary && raw.quoteSummary.result && raw.quoteSummary.result[0];
-        if (!result) { console.warn('Yahoo quoteSummary empty attempt '+i); continue; }
-        var fd = result.financialData || {};
-        var rt = result.recommendationTrend || {};
-        ptMean      = fd.targetMeanPrice      && fd.targetMeanPrice.raw      ? fd.targetMeanPrice.raw      : 0;
-        ptHigh      = fd.targetHighPrice      && fd.targetHighPrice.raw      ? fd.targetHighPrice.raw      : 0;
-        ptLow       = fd.targetLowPrice       && fd.targetLowPrice.raw       ? fd.targetLowPrice.raw       : 0;
-        numAnalysts = fd.numberOfAnalystOpinions && fd.numberOfAnalystOpinions.raw ? fd.numberOfAnalystOpinions.raw : 0;
-        recMean     = fd.recommendationMean   && fd.recommendationMean.raw   ? fd.recommendationMean.raw   : 0;
-        recKey      = fd.recommendationKey || '';
-        if (rt.trend && rt.trend.length > 0) {
-          var t0 = rt.trend[0];
-          trend = { strongBuy:t0.strongBuy||0, buy:t0.buy||0, hold:t0.hold||0, sell:t0.sell||0, strongSell:t0.strongSell||0 };
-        }
-      }
-
-      if (!ptMean && !recMean) { console.warn('Yahoo analyst attempt '+i+' returned no useful data'); continue; }
-
-      var yd=document.getElementById('yhaDot'), yt=document.getElementById('yhaTxt');
-      if(yd) yd.className='dot on';
-      if(yt) yt.textContent='YH Analyst: Live';
-
-      console.log(ticker+' Yahoo analyst OK (attempt '+i+'): PT=$'+ptMean+' rec='+recKey+' n='+numAnalysts);
-      return { ptMean, ptHigh, ptLow, numAnalysts, recMean, recKey, trend, source:'yahoo' };
-    } catch(e) {
-      console.warn(ticker+' Yahoo analyst attempt '+i+' failed: '+e.message);
-      continue;
-    }
+  // v7/finance/quote is the least-blocked Yahoo endpoint for analyst fields
+  var target = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols='+ticker
+    +'&fields=targetMeanPrice,targetHighPrice,targetLowPrice,numberOfAnalystOpinions,recommendationMean,recommendationKey,financialCurrency';
+  var url = 'https://api.allorigins.win/get?url='+encodeURIComponent(target);
+  try {
+    var r = await fetchWithTimeout(url, 3000);
+    if (!r.ok) { console.warn(ticker+' Yahoo analyst HTTP '+r.status); return null; }
+    var wrapper = await r.json();
+    if (!wrapper.contents) { console.warn(ticker+' Yahoo analyst: empty contents'); return null; }
+    // Log raw for debugging — open DevTools Console to see this
+    console.log(ticker+' Yahoo analyst raw:', wrapper.contents.substring(0, 400));
+    var raw;
+    try { raw = JSON.parse(wrapper.contents); } catch(e) { return null; }
+    var qr = raw && raw.quoteResponse && raw.quoteResponse.result;
+    if (!qr || !qr.length) { console.warn(ticker+' Yahoo analyst: no quoteResponse.result'); return null; }
+    var q = qr[0];
+    var ptMean = q.targetMeanPrice || 0;
+    var recMean = q.recommendationMean || 0;
+    if (!ptMean && !recMean) { console.warn(ticker+' Yahoo analyst: no PT or rec in result. Keys:', Object.keys(q).join(',')); return null; }
+    var yd=document.getElementById('yhaDot'), yt=document.getElementById('yhaTxt');
+    if(yd) yd.className='dot on';
+    if(yt) yt.textContent='YH Analyst: Live';
+    console.log(ticker+' Yahoo analyst OK: PT=$'+ptMean+' rec='+q.recommendationKey+' n='+q.numberOfAnalystOpinions);
+    return {
+      ptMean, ptHigh: q.targetHighPrice||0, ptLow: q.targetLowPrice||0,
+      numAnalysts: q.numberOfAnalystOpinions||0, recMean, recKey: q.recommendationKey||'',
+      trend:{}, source:'yahoo'
+    };
+  } catch(e) {
+    console.warn(ticker+' Yahoo analyst exception: '+e.message);
+    return null;
   }
-  console.warn(ticker+' Yahoo analyst: all endpoints failed');
-  return null;
 }
 
 // ── MERGE ANALYST DATA: FMP + Yahoo → best available ──
@@ -590,7 +541,8 @@ async function fmpFundamentals(ticker) {
   var empty = {recTrend:[], priceTarget:{}, calendar:{earningsCalendar:[]}, insider:{data:[]}};
   var limitKey='fmp_limit_'+new Date().toDateString();
 
-  // Run Yahoo analyst fetch in parallel — always, regardless of FMP status
+  // Yahoo analyst runs as background promise — does NOT block load speed
+  // Results update the row after price/momentum data is already shown
   var yahooAnalystPromise = yahooAnalyst(ticker).catch(()=>null);
 
   if(!FMP_KEY||localStorage.getItem(limitKey)) {
@@ -842,6 +794,7 @@ function init() {
     TD_KEY=localStorage.getItem('wi_td')||'';
     FMP_KEY=localStorage.getItem('wi_fmp')||'';
     UW_KEY=localStorage.getItem('wi_uw')||'';
+    CLAUDE_KEY=localStorage.getItem('wi_claude')||'';
     var saved=localStorage.getItem('wi_list');
     WATCHLIST=saved?JSON.parse(saved):['AAPL','AMD','NVDA','MSFT'];
   } catch(e){WATCHLIST=['AAPL','AMD','NVDA','MSFT'];}
@@ -880,6 +833,8 @@ async function connectAPIs() {
       localStorage.setItem('wi_fmp',mk);
     }
     if(uk) localStorage.setItem('wi_uw',uk);
+    var ck=document.getElementById('claudeKey').value.trim();
+    if(ck){CLAUDE_KEY=ck;localStorage.setItem('wi_claude',ck);}
     setDot('fh','on','Finnhub: Live');
     if(tk) setDot('td','on','TwelveData: Live');
     if(mk) setDot('fmp','on','FMP: Live');
@@ -948,7 +903,7 @@ async function refreshAll(){
     if(prog) prog.textContent=loaded+'/'+toLoad.length+' loaded…';
     await Promise.all(batch.map(t=>loadTickerWithRetry(t)));
     renderTable();
-    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,8000));
+    if(i+BATCH<toLoad.length) await new Promise(r=>setTimeout(r,5000));
   }
   btn.classList.remove('spinning'); btn.dataset.loading='0';
   if(prog) prog.textContent='';
@@ -1497,6 +1452,8 @@ function openSettings(){
   if(fk)document.getElementById('fhKey').value=fk;
   if(tk)document.getElementById('tdKey').value=tk;
   if(mk)document.getElementById('fmpKey').value=mk;
+  var ck=localStorage.getItem('wi_claude')||'';
+  if(ck)document.getElementById('claudeKey').value=ck;
 }
 
 function clearAllCaches(){
@@ -1553,10 +1510,10 @@ async function runDiagnostics(){
   // Test Yahoo Analyst (NEW)
   try {
     var ya=await yahooAnalyst('AAPL');
-    if(ya) add('Yahoo quoteSummary AAPL (v6.26 NEW)','OK',
+    if(ya) add('Yahoo v7/quote AAPL','OK',
       'PT=$'+ya.ptMean.toFixed(2)+' rec='+ya.recKey+' n='+ya.numAnalysts);
-    else add('Yahoo quoteSummary AAPL (v6.26 NEW)','FAIL','No data returned');
-  } catch(e){add('Yahoo quoteSummary AAPL (v6.26 NEW)','FAIL',e.message);}
+    else add('Yahoo v7/quote AAPL','FAIL','No data — check Console for raw response');
+  } catch(e){add('Yahoo v7/quote AAPL','FAIL',e.message);}
 
   // Test FMP
   if(FMP_KEY){
@@ -1599,6 +1556,191 @@ function openGL(){
   var blob=new Blob([buildGlossary()],{type:'text/html'});
   window.open(URL.createObjectURL(blob),'_blank','noopener');
 }
+
+// ── MORNING BRIEF ─────────────────────────────────────
+// Reads all loaded scores, builds a structured prompt, calls Claude API,
+// renders a styled brief panel above the table.
+function buildBriefPrompt() {
+  var today = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  var lines = ['WATCHLIST MORNING BRIEF — '+today,''];
+  var loaded = WATCHLIST.filter(t=>DATA[t]&&!DATA[t].err&&!DATA[t]._loading);
+  if(!loaded.length) return null;
+
+  loaded.forEach(t=>{
+    var s=scores(t); if(!s)return;
+    var d=DATA[t];
+    var prof=(d.profile&&d.profile.name)||t;
+    var earnStr=s.earn?s.earn.days+'d to earnings ('+s.earn.date+')':'no earnings date';
+    var ptStr=s.raw.ptMean!=='N/A'?'analyst PT $'+s.raw.ptMean+' ('+( s.analystUpside>0?'+':'')+s.analystUpside.toFixed(1)+'% upside)':'no PT data';
+    var insStr=s.insider.net!==0?s.insider.label+' (net '+s.insider.net.toLocaleString()+' shares 90d)':'no insider activity';
+    lines.push('TICKER: '+t+' ('+prof+')');
+    lines.push('  Price: $'+s.price.toFixed(2)+' | Chg: '+(s.chg>=0?'+':'')+s.chg.toFixed(2)+'%');
+    lines.push('  Signal: '+s.sig+' | Setup: '+s.setup+' | Readiness: '+s.readiness);
+    lines.push('  Exhaustion: '+s.exhaustion+' | Momentum: '+s.mom+' | Valuation: '+s.val);
+    lines.push('  Smart$: '+s.smart+' | Analyst: '+(s.analystHasData?s.analyst:'N/A'));
+    lines.push('  RSI: '+s.raw.rsi+' | 52W position: '+s.raw.r52+'% | Dist 20DMA: '+s.raw.d20+'%');
+    lines.push('  Earnings: '+earnStr);
+    lines.push('  Insider: '+insStr);
+    lines.push('  '+ptStr);
+    lines.push('  Industry: '+s.raw.industry+' | PE(TTM): '+s.raw.pe+' | EV/EBITDA: '+s.raw.ev);
+    lines.push('');
+  });
+
+  var prompt = lines.join('\n');
+  prompt += `
+You are a professional trading analyst. Based on the watchlist data above, write a concise pre-market morning brief.
+
+Structure your response EXACTLY as follows (use these exact section headers):
+
+## TODAY'S FOCUS LIST
+List the 2-4 strongest setups worth watching today. For each: ticker, one-sentence reason why it stands out, key level or catalyst to watch. Be specific.
+
+## RISK ALERTS
+Flag any tickers with earnings within 14 days, exhaustion above 70, or signals deteriorating. Explain the specific risk for each.
+
+## POSSIBLE ACTIONS
+2-3 concrete, specific ideas suited to options strategies (CSPs, PMCCs, covered calls). Include rough strike/DTE guidance where appropriate. If no clean setups exist, say so clearly — an honest "wait" is better than a forced trade.
+
+## AVOID TODAY
+Tickers to skip and why. Be direct.
+
+## OVERALL MARKET TONE
+One paragraph: what does this watchlist collectively signal about current market conditions?
+
+Rules: Be direct and opinionated. No hedging. Use dollar signs and percentages. Mention specific scores when they drive the call. Keep the whole brief under 400 words.`;
+
+  return prompt;
+}
+
+async function generateMorningBrief() {
+  var loaded = WATCHLIST.filter(t=>DATA[t]&&!DATA[t].err&&!DATA[t]._loading);
+  if(!loaded.length) {
+    alert('Load your watchlist data first — hit Refresh All, then try Morning Brief again.');
+    return;
+  }
+
+  if(!CLAUDE_KEY) {
+    var panel=document.getElementById('briefPanel');
+    panel.style.display='block';
+    panel.innerHTML=`<div style="margin:0 0 12px;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:16px 18px;">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;">☀ MORNING BRIEF — API KEY NEEDED</div>
+      <p style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:10px;">To generate AI-powered briefs, add your Claude API key in ⚙️ Settings.<br>Get a free key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent);">console.anthropic.com</a> → API Keys.</p>
+      <button onclick="openSettings()" class="btn-add" style="font-size:11px;">⚙️ Open Settings</button>
+    </div>`;
+    return;
+  }
+
+  var prompt = buildBriefPrompt();
+  if(!prompt) { alert('No data loaded yet.'); return; }
+
+  var panel=document.getElementById('briefPanel');
+  panel.style.display='block';
+  panel.innerHTML=`<div style="margin:0 0 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px 18px;">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+      <div class="spinner"></div> Generating morning brief…
+    </div>
+    <div style="font-size:12px;color:var(--text3);">Analyzing ${loaded.length} tickers…</div>
+  </div>`;
+
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': CLAUDE_KEY,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1000,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+
+    if(!resp.ok) {
+      var err=await resp.json().catch(()=>({error:{message:'HTTP '+resp.status}}));
+      throw new Error(err.error?.message||'HTTP '+resp.status);
+    }
+
+    var data = await resp.json();
+    var text = data.content.map(b=>b.type==='text'?b.text:'').join('');
+    renderBrief(text, loaded.length);
+  } catch(e) {
+    panel.innerHTML=`<div style="margin:0 0 12px;background:rgba(255,61,87,.05);border:1px solid rgba(255,61,87,.2);border-radius:8px;padding:16px 18px;">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--red);margin-bottom:6px;">☀ BRIEF ERROR</div>
+      <div style="font-size:12px;color:var(--text2);">${e.message}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px;">Check your Claude API key in ⚙️ Settings. Get one free at console.anthropic.com.</div>
+    </div>`;
+  }
+}
+
+function renderBrief(text, tickerCount) {
+  var now = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  var date = new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+
+  // Parse sections
+  var sectionColors = {
+    "TODAY'S FOCUS LIST":  {bg:'rgba(0,230,118,.06)',  border:'rgba(0,230,118,.2)',  label:'var(--green)'},
+    "RISK ALERTS":         {bg:'rgba(255,61,87,.06)',   border:'rgba(255,61,87,.2)',  label:'var(--red)'},
+    "POSSIBLE ACTIONS":    {bg:'rgba(0,212,255,.06)',   border:'rgba(0,212,255,.2)',  label:'var(--accent)'},
+    "AVOID TODAY":         {bg:'rgba(255,145,0,.06)',   border:'rgba(255,145,0,.2)',  label:'var(--orange)'},
+    "OVERALL MARKET TONE": {bg:'rgba(124,77,255,.06)', border:'rgba(124,77,255,.2)', label:'var(--purple)'}
+  };
+
+  // Split into sections
+  var sections = [];
+  var lines = text.split('\n');
+  var cur = null;
+  lines.forEach(line=>{
+    var hdr = line.replace(/^#+\s*/, '').trim().toUpperCase();
+    if(sectionColors[hdr]) {
+      if(cur) sections.push(cur);
+      cur = {title:hdr, style:sectionColors[hdr], lines:[]};
+    } else if(cur) {
+      cur.lines.push(line);
+    }
+  });
+  if(cur) sections.push(cur);
+
+  var html = `<div style="margin:0 0 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+    <div style="background:linear-gradient(135deg,rgba(0,212,255,.1),rgba(124,77,255,.06));border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.15em;text-transform:uppercase;">☀ Morning Brief</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;">${date} · ${now} · ${tickerCount} tickers analyzed</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="generateMorningBrief()" class="btn-ref" style="font-size:10px;">↻ Regenerate</button>
+        <button onclick="document.getElementById('briefPanel').style.display='none'" class="btn-ref" style="font-size:10px;">✕ Close</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">`;
+
+  sections.forEach((sec,i)=>{
+    var body = sec.lines.join('\n').trim();
+    // Convert markdown bold **text** to styled spans
+    body = body.replace(/\*\*(.*?)\*\*/g,'<strong style="color:var(--text);">$1</strong>');
+    // Convert bullet points
+    body = body.replace(/^[-•*]\s+/gm, '→ ');
+    // Preserve line breaks
+    body = body.replace(/\n/g,'<br>');
+    var isWide = sec.title==='OVERALL MARKET TONE';
+    html+=`<div style="padding:14px 16px;background:${sec.style.bg};border-right:${i%2===0?'1px solid var(--border)':'none'};border-bottom:1px solid var(--border);${isWide?'grid-column:1/-1;':''}">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:${sec.style.label};margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid ${sec.style.border};">${sec.title}</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.75;">${body}</div>
+    </div>`;
+  });
+
+  // Fallback if no sections parsed — just show raw
+  if(!sections.length) {
+    var raw = text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+    html+=`<div style="padding:14px 16px;grid-column:1/-1;font-size:12px;color:var(--text2);line-height:1.75;">${raw}</div>`;
+  }
+
+  html+=`</div></div>`;
+  document.getElementById('briefPanel').innerHTML=html;
+}
+
 
 init();
 </script>
